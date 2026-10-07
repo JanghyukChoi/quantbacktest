@@ -19,11 +19,11 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 sys.path.insert(0, str(HERE))
-import quantbt as q                                                       # noqa: E402
-from quantbt.adapters.krx import build_krx_panel                           # noqa: E402
-from quantbt.analytics import sharpe_diff_ci                               # noqa: E402
-from quantbt.core.controls import neutralize, xs_norm                      # noqa: E402
-from quantbt.equity import survivors_only                                  # noqa: E402
+import pitbacktest as q                                                       # noqa: E402
+from pitbacktest.adapters.krx import build_krx_panel                           # noqa: E402
+from pitbacktest.analytics import sharpe_diff_ci                               # noqa: E402
+from pitbacktest.core.controls import neutralize, xs_norm                      # noqa: E402
+from pitbacktest.equity import survivors_only                                  # noqa: E402
 from run_study import COSTS, HOLDS, START, STORE, factors                  # noqa: E402
 
 warnings.filterwarnings("ignore")

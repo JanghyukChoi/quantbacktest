@@ -66,7 +66,7 @@ def build_panel(store: ArchiveStore | None = None, *, symbols: list[str] | None 
         ff = store.dir / "funding" / f"{s}.pkl"
         fund[s] = pd.read_pickle(ff) if ff.exists() else store.fetch_funding(s, False)
     if not bars:
-        raise ValueError("no data: run quantbt.crypto.fetch_all() first")
+        raise ValueError("no data: run pitbacktest.crypto.fetch_all() first")
 
     idx = pd.date_range(min(d.index[0] for d in bars.values()), max(d.index[-1] for d in bars.values()), freq="D")
     cols = sorted(bars)

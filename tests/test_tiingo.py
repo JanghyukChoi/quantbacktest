@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-from quantbt.adapters import tiingo
-from quantbt.equity import survivors_only
+from pitbacktest.adapters import tiingo
+from pitbacktest.equity import survivors_only
 
 DAYS = pd.bdate_range("2021-01-04", periods=300)
 

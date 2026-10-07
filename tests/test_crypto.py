@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import json
 import numpy as np
 import pandas as pd
-import quantbt as q
-from quantbt.crypto.binance_archive import ArchiveStore
-from quantbt.crypto.panel import build_panel
+import pitbacktest as q
+from pitbacktest.crypto.binance_archive import ArchiveStore
+from pitbacktest.crypto.panel import build_panel
 
 DAYS = pd.date_range("2021-01-01", periods=420, freq="D")
 DEAD = {"DEAD1USDT": 250, "DEAD2USDT": 300, "DEAD3USDT": 330}      # symbol -> last real bar index
@@ -140,7 +140,7 @@ def test_cost_model_is_not_fooled_by_volatility():
     vol = pd.DataFrame(rng.lognormal(18, 0.2, (200, 12)), index=dates, columns=tick) / close
     p = q.Panel(close=close, eligible=pd.DataFrame(True, index=dates, columns=tick), high=hi, low=lo, volume=vol,
                 market="CRYPTO", periods_per_year=365)
-    from quantbt.crypto import liquidity_cost_bp
+    from pitbacktest.crypto import liquidity_cost_bp
     import warnings
     ok = liquidity_cost_bp(p).iloc[60:].stack()
     assert ok.max() <= 12.0 + 1e-9, ok.max()                                  # fee 5 + half spread 2 (+5 if thin)

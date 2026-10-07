@@ -6,10 +6,10 @@ import tempfile
 import numpy as np
 import pandas as pd
 
-import quantbt as q
+import pitbacktest as q
 
 assert "site-packages" in q.__file__.replace("\\", "/") or "dist-packages" in q.__file__, q.__file__
-dist = next(d for d in md.distributions() if (d.read_text("top_level.txt") or "").split() and "quantbt" in (d.read_text("top_level.txt") or "").split())
+dist = next(d for d in md.distributions() if (d.read_text("top_level.txt") or "").split() and "pitbacktest" in (d.read_text("top_level.txt") or "").split())
 assert dist.version == q.__version__, (dist.version, q.__version__)
 
 rng = np.random.default_rng(0)

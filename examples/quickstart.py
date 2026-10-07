@@ -1,4 +1,4 @@
-"""quantbt 사용 예 — 세 진입점.
+"""pitbacktest 사용 예 — 세 진입점.
 
 여기서는 합성 데이터로 흐름만 보인다. 실데이터는 adapters.yfinance 를 쓴다.
 """
@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
+import pitbacktest as q
 
 # ── 1. 패널 준비 ───────────────────────────────────────────────
 rng = np.random.default_rng(7)

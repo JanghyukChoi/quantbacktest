@@ -1,5 +1,9 @@
 # Crypto cross-section study
 
+> **Naming.** This study was written when the library was called `quantbt`; it is `pitbacktest` now. The frozen documents
+> (`PREREGISTRATION.md`, `AMENDMENT_1.md`) keep the old name on purpose, and the code in this folder uses the new one.
+
+
 Four simple factors on Binance USDT-margined perpetuals, tested with the biases that usually flatter crypto backtests
 removed or measured: survivorship (delisted contracts included), universe look-ahead, funding, costs and delisting.
 
@@ -66,5 +70,5 @@ would be weaker evidence than a pass in the original design. Here nothing passes
   (reversal loses, momentum wins) inflate that dispersion, which makes the gate stricter than a test of 12 equivalent tries.
 - PBO from one dataset is noisy (about 0.16 standard deviation under pure noise, see `tests/test_validation.py`).
   0.06 is a good sign, not a proof.
-- Reproduce with `python -c "import quantbt.crypto as c; c.fetch_all()"` then `python run_study.py amended`
+- Reproduce with `python -c "import pitbacktest.crypto as c; c.fetch_all()"` then `python run_study.py amended`
   (about 25 minutes of downloading, a few minutes of analysis). Re-running later uses more recent data and will differ.

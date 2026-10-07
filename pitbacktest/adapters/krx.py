@@ -58,7 +58,7 @@ def load_key(env_path: str | Path | None = None) -> str:
 
 
 def _call(path: str, date: str, key: str, retries: int = 4) -> list[dict]:
-    req = urllib.request.Request(f"{BASE}/{path}?basDd={date}", headers={"AUTH_KEY": key, "User-Agent": "quantbt-research/0.2"})
+    req = urllib.request.Request(f"{BASE}/{path}?basDd={date}", headers={"AUTH_KEY": key, "User-Agent": "pitbacktest-research/0.2"})
     delay = 1.0
     for i in range(retries + 1):
         try:

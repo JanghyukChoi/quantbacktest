@@ -13,10 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
-from quantbt.adapters.long_format import panel_from_long
-from quantbt.equity import inject_delistings, survivorship_scenarios, survivors_only, universe_coverage
-from quantbt.equity.master import _clean
+import pitbacktest as q
+from pitbacktest.adapters.long_format import panel_from_long
+from pitbacktest.equity import inject_delistings, survivorship_scenarios, survivors_only, universe_coverage
+from pitbacktest.equity.master import _clean
 
 
 def _panel(n=100, T=1300, seed=1):

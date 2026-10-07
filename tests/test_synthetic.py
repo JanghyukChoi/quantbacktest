@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
-from quantbt.core.controls import build_controls, xs_norm
+import pitbacktest as q
+from pitbacktest.core.controls import build_controls, xs_norm
 
 
 def make_panel(n_days=1200, n_stocks=200, seed=0):
@@ -121,8 +121,8 @@ def main():
 
     # T9 소형 유니버스에서 FM 회귀 — min_stocks 고정이면 전 날짜가 버려진다
     small2, r2 = make_panel(n_days=900, n_stocks=25, seed=11)
-    from quantbt.core.estimators import fama_macbeth
-    from quantbt.core.controls import build_controls as _bc
+    from pitbacktest.core.estimators import fama_macbeth
+    from pitbacktest.core.controls import build_controls as _bc
     c2 = _bc(small2, include_chars=False)
     f2 = xs_norm(pd.DataFrame(r2.normal(size=(len(small2.dates), 25)),
                               index=small2.dates, columns=small2.tickers), small2.eligible)

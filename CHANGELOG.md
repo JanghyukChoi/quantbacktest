@@ -1,14 +1,17 @@
 # Changelog
 
 ## 0.2.0
-- `quantbt.ledger.Ledger`: hash-chained record of every run; `backtest_portfolio(..., ledger=...)` and the deflated Sharpe take the
+- **Renamed: the package and the import are now `pitbacktest`** (they were `quantbt`). The name `quantbt` on PyPI belongs to an unrelated
+  project, and two distributions that share a top-level package would overwrite each other's files. The data cache directory
+  keeps its old name, `~/.cache/quantbt`, so downloads already on disk are still found.
+- `pitbacktest.ledger.Ledger`: hash-chained record of every run; `backtest_portfolio(..., ledger=...)` and the deflated Sharpe take the
   trial count from the record.
-- `quantbt.analytics`: alpha and beta with Newey-West errors, rank IC with delisted names kept, stationary-bootstrap Sharpe intervals
+- `pitbacktest.analytics`: alpha and beta with Newey-West errors, rank IC with delisted names kept, stationary-bootstrap Sharpe intervals
   and a paired difference. Cross-checked against statsmodels and scipy.
-- `quantbt.weights`: `backtest_weights` (spread, borrow, square-root market impact), `capacity_curve`, with a point-in-time universe guard.
-- `quantbt.adapters.tiingo`: random-sample downloader and panel builder that keeps delisted securities (free account).
-- `quantbt.adapters.krx`: official KRX OpenAPI adapter; Korean survivorship study in `studies/korea_survivorship`.
-- `quantbt.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
+- `pitbacktest.weights`: `backtest_weights` (spread, borrow, square-root market impact), `capacity_curve`, with a point-in-time universe guard.
+- `pitbacktest.adapters.tiingo`: random-sample downloader and panel builder that keeps delisted securities (free account).
+- `pitbacktest.adapters.krx`: official KRX OpenAPI adapter; Korean survivorship study in `studies/korea_survivorship`.
+- `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
 - **Fixed**: Sortino used the standard deviation of negative returns instead of the downside deviation.
 - **Fixed**: `neutralize` returned rounding noise when a factor lay inside the span of the controls; after a rank-normalisation that noise
   became a full-scale signal and the result depended on the BLAS build (seen as a failure on Python 3.10 only). Such days are now NaN.

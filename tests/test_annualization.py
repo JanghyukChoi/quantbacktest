@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
+import pitbacktest as q
 
 
 def _panel(ppy: int) -> q.Panel:

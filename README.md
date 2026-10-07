@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml/badge.svg)](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml)
 
-The Python package is named `quantbt` (`import quantbt`); the repository is `quantbacktest`.
+The Python package is named `pitbacktest` (`import pitbacktest`); the repository is `quantbacktest`.
 
 A small backtest harness for factor screening, event signals and portfolio alphas. Core dependencies are
 `pandas` and `numpy` only.
@@ -18,8 +18,8 @@ free of survivorship bias.
 
 | Market | Data path | Survivorship-free? | Status |
 |---|---|---|---|
-| Crypto perpetuals (Binance) | `quantbt.crypto`, public archive | **Yes**: 900 contracts ever listed, 376 of them delisted or halted. Funding charged, delistings explicit | Tested; preregistered study in `studies/crypto_cross_section` |
-| Korean stocks | `quantbt.adapters.krx`, official KRX OpenAPI (free key) | **Yes**: the API returns every stock listed on each day, so later delistings are inside the history. Adjusted returns come from the change versus the reference price, no price-adjustment table needed | Return formula checked on live data (all 953 KOSPI names on 2024-01-02, Samsung's 50:1 split day); panel build tested offline. Measured on 13 years of data: the survivors-only shortcut moves a factor's Sharpe by up to 0.23 in either direction, averaging about zero (`studies/korea_survivorship`) |
+| Crypto perpetuals (Binance) | `pitbacktest.crypto`, public archive | **Yes**: 900 contracts ever listed, 376 of them delisted or halted. Funding charged, delistings explicit | Tested; preregistered study in `studies/crypto_cross_section` |
+| Korean stocks | `pitbacktest.adapters.krx`, official KRX OpenAPI (free key) | **Yes**: the API returns every stock listed on each day, so later delistings are inside the history. Adjusted returns come from the change versus the reference price, no price-adjustment table needed | Return formula checked on live data (all 953 KOSPI names on 2024-01-02, Samsung's 50:1 split day); panel build tested offline. Measured on 13 years of data: the survivors-only shortcut moves a factor's Sharpe by up to 0.23 in either direction, averaging about zero (`studies/korea_survivorship`) |
 | US stocks | `adapters.yfinance`, or your own point-in-time data through `adapters.long_format` | **Not with yfinance**: it returned a correct history for 0 of 42 well-known delisted or acquired stocks (`docs/survivorship.md`). Yes if you bring CRSP, Sharadar or Norgate data | Detector, coverage report and delisting scenarios; no free fix exists |
 
 ## Three entry points
@@ -82,7 +82,7 @@ q.capacity_curve(panel, weights, aums=[1e6, 5e6, 25e6, 100e6], y_values=(0.5, 1.
 
 ## Install
 
-Not on PyPI yet. From a clone:
+Not on PyPI yet (the planned name is `pitbacktest`; import it as `pitbacktest`). From a clone:
 
 ```bash
 pip install -e .                  # pandas and numpy are the only requirements
@@ -96,8 +96,8 @@ package declares. Only Linux is tested.
 ## Example (public data)
 
 ```python
-import quantbt as q
-from quantbt.adapters.yfinance import load_panel
+import pitbacktest as q
+from pitbacktest.adapters.yfinance import load_panel
 
 panel = load_panel(["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "JPM", "XOM", "JNJ"],
                    "2018-01-01", "2024-12-31")
@@ -121,7 +121,7 @@ should fail every gate, and they do.
 
 Two layers. `market="CRYPTO"` in the yfinance adapter (or `periods_per_year=365` on a `Panel`) fixes the annualisation:
 with 252 days the CAGR, Sharpe and volatility of a 24/7 market come out wrong (on a 4.6-year sample, 252 reported 6.6
-years of data). On top of that, `quantbt.crypto` builds a panel for Binance USDT-margined perpetuals from the public
+years of data). On top of that, `pitbacktest.crypto` builds a panel for Binance USDT-margined perpetuals from the public
 archive and removes or measures the biases that usually flatter a crypto backtest:
 
 | bias | what is done |
@@ -134,8 +134,8 @@ archive and removes or measures the biases that usually flatter a crypto backtes
 | Costs | taker fee plus a fixed half spread plus a thin-contract penalty, and a participation report instead of an invented impact model |
 
 ```python
-import quantbt as q
-from quantbt.crypto import fetch_all, build_panel, liquidity_cost_bp, participation_report
+import pitbacktest as q
+from pitbacktest.crypto import fetch_all, build_panel, liquidity_cost_bp, participation_report
 
 fetch_all()                                                     # once: ~900 contracts into ~/.cache/quantbt
 panel = build_panel(start="2020-08-01", min_adv_usd=2e7, min_age_days=90)
@@ -145,7 +145,7 @@ print(res.metrics["funding_annual_bp"], res.metrics["delist_events_held"])
 print(participation_report(panel, res.holdings, aum_usd=10e6))
 ```
 
-`quantbt.validation` has the deflated Sharpe, PBO (CSCV) and a permutation test for the selection you ran.
+`pitbacktest.validation` has the deflated Sharpe, PBO (CSCV) and a permutation test for the selection you ran.
 `studies/crypto_cross_section/` is a worked, preregistered example: four factors, 12 trials, five gates. It is **not
 validated**, and the README there explains what the biases changed and what went wrong along the way.
 
@@ -154,14 +154,14 @@ delisted contract after its last bar, borrow limits and margin, and anything out
 
 ## Equities: Korea and the US
 
-**Korea.** `quantbt.adapters.krx` builds a point-in-time panel from the cached daily files of the official KRX OpenAPI
+**Korea.** `pitbacktest.adapters.krx` builds a point-in-time panel from the cached daily files of the official KRX OpenAPI
 (`fetch_days`, resumable, about two calls per trading day). Eligibility on day t uses only data up to t; securities that stop
 trading are kept for the days they traded and flagged in `delist_after`. A code that vanishes for 120+ days and returns is
 treated as a different security. Prices are adjusted by compounding the reference-price returns (price return only,
 no dividends). You need a KRX OpenAPI key (`KRX_OPENAPI_KEY`).
 
 ```python
-from quantbt.adapters.krx import fetch_days, build_krx_panel, load_key
+from pitbacktest.adapters.krx import fetch_days, build_krx_panel, load_key
 fetch_days("2013-01-01", "2026-10-06", "~/.cache/quantbt/krx", key=load_key(".env"))
 panel = build_krx_panel("~/.cache/quantbt/krx", start="2013-01-01")
 ```

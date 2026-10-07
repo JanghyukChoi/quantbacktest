@@ -1,5 +1,9 @@
 # Korea survivorship study
 
+> **Naming.** This study was written when the library was called `quantbt`; it is `pitbacktest` now. The frozen documents
+> (`PREREGISTRATION.md`, `AMENDMENT_1.md`) keep the old name on purpose, and the code in this folder uses the new one.
+
+
 Same four factor portfolios, run twice on Korean equities (KOSPI and KOSDAQ, 2013-01-02 to 2026-10-06, 3,377 trading days):
 
 - **A**: every stock listed on each day, including the ones delisted later (point in time, from the official KRX OpenAPI).
@@ -75,7 +79,7 @@ look less bad. A test would split the A portfolio into legs and remove delisted 
   and **nothing here validates a factor**. Two of the four lose money at 15 bp on both universes.
 - B removes names that were *delisted*, which includes mergers where holders were paid a premium, so the sign can differ
   by factor (as it does). Code changes from corporate restructurings can look like a delisting plus a new listing
-  (120-day gap rule, see `quantbt/adapters/krx.py`), which slightly overstates how many names disappear.
+  (120-day gap rule, see `pitbacktest/adapters/krx.py`), which slightly overstates how many names disappear.
 - Eligibility needs a trailing median traded value of 1 billion won, so most micro-caps are excluded from both A and B.
   The bias in the full market is probably larger than measured here.
 
@@ -83,7 +87,7 @@ look less bad. A test would split the A portfolio into legs and remove delisted 
 
 ```
 export KRX_OPENAPI_KEY=...   # free key from openapi.krx.co.kr
-python -c "from quantbt.adapters.krx import fetch_days; fetch_days('2013-01-01','2026-10-06','~/.cache/quantbt/krx')"
+python -c "from pitbacktest.adapters.krx import fetch_days; fetch_days('2013-01-01','2026-10-06','~/.cache/quantbt/krx')"
 python run_study.py && python make_report.py
 ```
 

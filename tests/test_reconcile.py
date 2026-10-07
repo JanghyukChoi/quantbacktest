@@ -1,7 +1,7 @@
 """Reconciliation against an independent implementation, and calibration under the null.
 
 The engine is vectorised numpy. Here the same portfolio is computed again with plain Python loops, written from the
-documented rules and sharing no code with `quantbt.portfolio`, and the two must agree to rounding error. A second
+documented rules and sharing no code with `pitbacktest.portfolio`, and the two must agree to rounding error. A second
 group of tests checks that the overfitting statistics are calibrated: on pure noise they must reject about as often
 as they claim to.
 """
@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
-from quantbt import validation as v
-from quantbt.portfolio import metrics
+import pitbacktest as q
+from pitbacktest import validation as v
+from pitbacktest.portfolio import metrics
 
 
 def _panel(seed=3, T=260, N=40, delist=False, funding=False):
@@ -191,7 +191,7 @@ def test_permutation_p_values_are_not_anti_conservative():
 def test_neutralize_matches_lstsq_and_drops_numerically_empty_days():
     """Residuals equal an independent least-squares solution; a factor inside the span of the controls leaves rounding
     noise only, and that must come out as NaN (not as something a rank-normalisation could blow up)."""
-    from quantbt.core.controls import neutralize
+    from pitbacktest.core.controls import neutralize
     rng = np.random.default_rng(21)
     T, N = 40, 120
     idx = pd.bdate_range("2020-01-01", periods=T); cols = [f"S{i:03d}" for i in range(N)]

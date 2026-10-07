@@ -152,7 +152,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                 거래한 비중에 곱한다. 스칼라 20 == 패널 10 이다(tests/test_reconcile.py 가 고정한다).
     benchmark   cap(시총가중) | equal(동일가중) | None
     funding     panel.funding 이 있으면 롱은 지불, 숏은 수취로 반영 (선물). False 면 무시
-    ledger      quantbt.ledger.Ledger. 주면 이 실행을 장부에 기록한다(시도 횟수를 deflated Sharpe 에 자동 반영하려고).
+    ledger      pitbacktest.ledger.Ledger. 주면 이 실행을 장부에 기록한다(시도 횟수를 deflated Sharpe 에 자동 반영하려고).
     family      장부에서 같은 연구 질문을 묶는 이름. name 은 이 시도의 라벨(같은 라벨이어도 설정이 다르면 다른 시도).
     delist_return  panel.delist_after 로 표시된 종목의 마지막 실제 봉 **다음 날** 수익률 가정.
                 None 이면 0 (마지막 가격에 청산됐다고 가정 — 낙관적일 수 있음). 예: -0.5 로 민감도를 본다.

@@ -3,7 +3,7 @@
 의존성: `pip install yfinance`  (코어에는 불필요, 이 어댑터에서만 쓴다)
 
 사용
-    from quantbt.adapters.yfinance import load_panel
+    from pitbacktest.adapters.yfinance import load_panel
     panel = load_panel(["AAPL", "MSFT", "NVDA"], "2018-01-01", "2024-12-31")
 
 주의 — 무료 데이터의 한계

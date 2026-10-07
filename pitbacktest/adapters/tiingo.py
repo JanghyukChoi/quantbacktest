@@ -76,7 +76,7 @@ def _call(ticker: str, start: str, key: str, retries: int = 3):
     """Bars for one ticker, or None if the API does not know it. Raises QuotaExceeded on HTTP 429."""
     url = f"{BASE}/{ticker.lower()}/prices?startDate={start}&format=json"
     req = urllib.request.Request(url, headers={"Authorization": f"Token {key}", "Content-Type": "application/json",
-                                               "User-Agent": "quantbt-research/0.2"})
+                                               "User-Agent": "pitbacktest-research/0.2"})
     delay = 1.0
     for i in range(retries + 1):
         try:

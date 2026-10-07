@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
-from quantbt.weights import ImpactModel, backtest_weights, capacity_curve
+import pitbacktest as q
+from pitbacktest.weights import ImpactModel, backtest_weights, capacity_curve
 from test_reconcile import _panel
 
 

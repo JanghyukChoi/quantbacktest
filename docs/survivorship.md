@@ -45,12 +45,12 @@ at long gaps, as the KRX adapter does.
 
 I did not check how many requests the free tier allows in total; the probe stops at the first HTTP 429.
 
-## What `quantbt` does about it
+## What `pitbacktest` does about it
 
 - `Panel.audit()` reports `ended_before_end_share` and `survivorship_suspected`. In a real market a few percent of
   names disappear each year; a panel of 30+ names over 3+ years where almost none end early is a survivors-only panel.
   The yfinance adapter raises a warning when that happens.
-- The crypto path (`quantbt.crypto`) does not have the problem: the Binance archive keeps delisted contracts, and 42%
+- The crypto path (`pitbacktest.crypto`) does not have the problem: the Binance archive keeps delisted contracts, and 42%
   of the USDT perpetuals ever listed are delisted or halted. `survivors_only=True` reproduces the shortcut so the
   bias can be measured (`studies/crypto_cross_section`).
 - Korea can be done without bias for free: the official KRX OpenAPI returns every stock listed on each day. On

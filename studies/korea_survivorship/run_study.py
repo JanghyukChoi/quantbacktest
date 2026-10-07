@@ -1,6 +1,6 @@
 """Run the preregistered Korean survivorship measurement in PREREGISTRATION.md.
 
-    python run_study.py          # needs the KRX cache: see quantbt/adapters/krx.py (fetch_days)
+    python run_study.py          # needs the KRX cache: see pitbacktest/adapters/krx.py (fetch_days)
 
 Writes results.json next to this file; make_report.py turns it into REPORT.md.
 """
@@ -17,9 +17,9 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-import quantbt as q                                                       # noqa: E402
-from quantbt.adapters.krx import build_krx_panel                           # noqa: E402
-from quantbt.equity import survivors_only                                  # noqa: E402
+import pitbacktest as q                                                       # noqa: E402
+from pitbacktest.adapters.krx import build_krx_panel                           # noqa: E402
+from pitbacktest.equity import survivors_only                                  # noqa: E402
 
 warnings.filterwarnings("ignore")
 STORE = Path.home() / ".cache" / "quantbt" / "krx"

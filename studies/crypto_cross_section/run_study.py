@@ -1,6 +1,6 @@
 """Run the preregistered study in PREREGISTRATION.md. Nothing here is tuned after seeing a result.
 
-    python run_study.py            # needs the archive cache: python -c "import quantbt.crypto as c; c.fetch_all()"
+    python run_study.py            # needs the archive cache: python -c "import pitbacktest.crypto as c; c.fetch_all()"
 
 Writes results_<spec>.json next to this file. `python run_study.py preregistered` reproduces the first run.
 """
@@ -17,10 +17,10 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-import quantbt as q                                                     # noqa: E402
-from quantbt import validation as val                                    # noqa: E402
-from quantbt.core.panel import Panel                                     # noqa: E402
-from quantbt.crypto import build_panel, liquidity_cost_bp, participation_report   # noqa: E402
+import pitbacktest as q                                                     # noqa: E402
+from pitbacktest import validation as val                                    # noqa: E402
+from pitbacktest.core.panel import Panel                                     # noqa: E402
+from pitbacktest.crypto import build_panel, liquidity_cost_bp, participation_report   # noqa: E402
 
 warnings.filterwarnings("ignore")
 START, WARM = "2021-01-01", "2020-08-01"

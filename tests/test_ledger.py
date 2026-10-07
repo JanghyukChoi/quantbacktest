@@ -7,8 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
-import quantbt as q
-from quantbt import validation as v
+import pitbacktest as q
+from pitbacktest import validation as v
 from test_reconcile import _panel
 
 

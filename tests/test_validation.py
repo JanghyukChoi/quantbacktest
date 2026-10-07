@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
-from quantbt import validation as v
+from pitbacktest import validation as v
 
 
 def _noise(T=2000, N=60, seed=1):

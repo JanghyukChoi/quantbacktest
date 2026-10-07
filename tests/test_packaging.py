@@ -1,26 +1,37 @@
-"""The version in pyproject.toml, in `quantbt.__version__` and in CHANGELOG.md must agree; the declared Python floor must match
+"""The version in pyproject.toml, in `pitbacktest.__version__` and in CHANGELOG.md must agree; the declared Python floor must match
 what the CI matrix and the classifiers claim."""
 from __future__ import annotations
 import re
 import sys
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import quantbt
+import pitbacktest
+
+
+def _meta() -> dict:
+    """The few pyproject fields these tests need, read with regular expressions: `tomllib` only exists from Python 3.11 and the
+    package supports 3.10."""
+    t = (ROOT / "pyproject.toml").read_text()
+    proj = t[t.index("[project]"):t.index("[project.optional-dependencies]")]
+    arr = lambda key: re.findall(r'"([^"]+)"', re.search(rf"^{key}\s*=\s*\[(.*?)^\]|^{key}\s*=\s*\[(.*?)\]", proj, re.S | re.M).group(0))
+    return {"name": re.search(r'^name = "([^"]+)"', proj, re.M).group(1), "version": re.search(r'^version = "([^"]+)"', proj, re.M).group(1),
+            "requires-python": re.search(r'^requires-python = "([^"]+)"', proj, re.M).group(1),
+            "classifiers": arr("classifiers"), "dependencies": arr("dependencies")}
 
 
 def test_versions_agree():
-    meta = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-    assert meta["version"] == quantbt.__version__, (meta["version"], quantbt.__version__)
+    meta = _meta()
+    assert meta["name"] == pitbacktest.__name__ == "pitbacktest"
+    assert meta["version"] == pitbacktest.__version__, (meta["version"], pitbacktest.__version__)
     top = re.search(r"^## (\d+\.\d+\.\d+)", (ROOT / "CHANGELOG.md").read_text(), re.M).group(1)
     assert top == meta["version"], f"CHANGELOG top entry {top} != {meta['version']}"
     print(f"P1 pyproject, __version__ and CHANGELOG all say {meta['version']}  PASS")
 
 
 def test_python_floor_is_consistent():
-    meta = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    meta = _meta()
     floor = re.search(r">=\s*3\.(\d+)", meta["requires-python"]).group(1)
     classifiers = [c for c in meta["classifiers"] if c.startswith("Programming Language :: Python :: 3.")]
     lowest = min(int(c.rsplit(".", 1)[1]) for c in classifiers)

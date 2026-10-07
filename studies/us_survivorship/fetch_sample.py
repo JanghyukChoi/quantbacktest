@@ -12,8 +12,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from quantbt.adapters import tiingo                # noqa: E402
-from quantbt.equity import load_us_master          # noqa: E402
+from pitbacktest.adapters import tiingo                # noqa: E402
+from pitbacktest.equity import load_us_master          # noqa: E402
 
 STORE = Path.home() / ".cache" / "quantbt" / "tiingo"
 TARGET, SEED, SINCE, CHUNK = 500, 0, "2013-01-01", 25

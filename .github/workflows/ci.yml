@@ -54,7 +54,7 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install ruff
       # Only errors that crash at run time (syntax, undefined names, redefinitions), not style.
-      - run: ruff check --select E9,F63,F7,F82,F811,F821,F822,F823 quantbt tests studies docs examples
+      - run: ruff check --select E9,F63,F7,F82,F811,F821,F822,F823 pitbacktest tests studies docs examples
 
   package:
     name: build and install the wheel
@@ -74,8 +74,8 @@ jobs:
           names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
           bad = [n for n in names if n.startswith(("tests/", "studies/", "docs/", "examples/", "build/"))]
           assert not bad, bad
-          for need in ("quantbt/__init__.py", "quantbt/portfolio.py", "quantbt/weights.py", "quantbt/adapters/krx.py",
-                       "quantbt/adapters/tiingo.py", "quantbt/crypto/panel.py", "quantbt/equity/scenarios.py", "quantbt/core/controls.py"):
+          for need in ("pitbacktest/__init__.py", "pitbacktest/portfolio.py", "pitbacktest/weights.py", "pitbacktest/adapters/krx.py",
+                       "pitbacktest/adapters/tiingo.py", "pitbacktest/crypto/panel.py", "pitbacktest/equity/scenarios.py", "pitbacktest/core/controls.py"):
               assert need in names, need
           print(len(names), "files in the wheel")
           PY

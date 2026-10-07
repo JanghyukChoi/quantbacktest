@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
 import pandas as pd
-import quantbt as q
-from quantbt import analytics as an
+import pitbacktest as q
+from pitbacktest import analytics as an
 from test_reconcile import _panel
 
 try:

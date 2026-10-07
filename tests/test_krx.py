@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
-from quantbt.adapters import krx
+from pitbacktest.adapters import krx
 
 DAYS = pd.bdate_range("2021-01-04", periods=300)
 

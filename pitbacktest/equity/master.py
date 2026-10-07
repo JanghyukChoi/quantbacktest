@@ -24,7 +24,7 @@ def load_us_master(cache_dir: str | Path | None = None, refresh: bool = False) -
     d.mkdir(parents=True, exist_ok=True)
     f = d / "tiingo_supported_tickers.zip"
     if refresh or not f.exists():
-        req = urllib.request.Request(URL, headers={"User-Agent": "quantbt-research/0.2 (public data only)"})
+        req = urllib.request.Request(URL, headers={"User-Agent": "pitbacktest-research/0.2 (public data only)"})
         f.write_bytes(urllib.request.urlopen(req, timeout=60).read())
     with zipfile.ZipFile(f) as z:
         df = pd.read_csv(io.BytesIO(z.read(z.namelist()[0])))
