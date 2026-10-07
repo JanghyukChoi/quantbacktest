@@ -2,7 +2,7 @@
 
     python run_study.py            # needs the archive cache: python -c "import quantbt.crypto as c; c.fetch_all()"
 
-Writes results.json and REPORT.md next to this file.
+Writes results_<spec>.json next to this file. `python run_study.py preregistered` reproduces the first run.
 """
 from __future__ import annotations
 
@@ -27,6 +27,10 @@ START, WARM = "2021-01-01", "2020-08-01"
 MIN_ADV, MIN_AGE = 2e7, 90
 HOLDS = (1, 5, 10)
 PPY = 365
+SPEC = "amended"                      # "preregistered" reproduces the first run (invalid cost model, see AMENDMENT_1.md)
+COST_KW = {"preregistered": dict(spread_estimator="corwin_schultz", thin_usd=1e8),
+           "amended": dict(spread_estimator="fixed", half_spread_bp=2.0, thin_usd=1e8)}
+GRID_BP = (0.0, 2.0, 5.0, 10.0, 20.0, 40.0)        # flat one-way costs for the sensitivity curve
 
 
 def make_factors(p: Panel) -> dict[str, pd.DataFrame]:
@@ -72,14 +76,22 @@ def year_stats(s: pd.Series) -> dict:
     return out
 
 
+def cost_panel(pf: Panel, fee: float = 5.0) -> pd.DataFrame:
+    return cut(pf, liquidity_cost_bp(pf, taker_fee_bp=fee, **COST_KW[SPEC]))
+
+
 def main() -> None:
+    global SPEC
+    if len(sys.argv) > 1:
+        SPEC = sys.argv[1]
+    assert SPEC in COST_KW, SPEC
     t0 = time.time()
     full = build_panel(start=WARM, min_adv_usd=MIN_ADV, min_age_days=MIN_AGE)
     surv = build_panel(start=WARM, min_adv_usd=MIN_ADV, min_age_days=MIN_AGE, survivors_only=True)
     arms = {}
     for name, pf in (("A", full), ("B", surv)):
         fac = {k: cut(pf, v) for k, v in make_factors(pf).items()}
-        cost = cut(pf, liquidity_cost_bp(pf, taker_fee_bp=5.0, thin_usd=1e8))
+        cost = cost_panel(pf)
         arms[name] = (sliced(pf), fac, cost, pf)
     pA, facA, costA, pfA = arms["A"]
     pB, facB, costB, _ = arms["B"]
@@ -112,10 +124,12 @@ def main() -> None:
     pos_share = float(np.mean([v["ret"] > 0 for v in ys.values()])) if ys else float("nan")
     stress = {
         "delist_return_-0.30": sharpe(run(pA, facA[fname], h, costA, delist_return=-0.30)),
-        "taker_fee_8bp": sharpe(run(pA, facA[fname], h, cut(pfA, liquidity_cost_bp(pfA, taker_fee_bp=8.0, thin_usd=1e8)))),
+        "taker_fee_8bp": sharpe(run(pA, facA[fname], h, cost_panel(pfA, 8.0))),
         "entry_lag_2": sharpe(run(pA, facA[fname], h, costA, entry_lag=2)),
     }
     pA.entry_lag = 1
+    sens = {f"{c:g}bp_oneway": sharpe(run(pA, facA[fname], h, 2.0 * c)) for c in GRID_BP}   # scalar spread_bp is a round trip
+    breakeven = max([c for c in GRID_BP if sens[f"{c:g}bp_oneway"] > 0], default=None)
     gates = {
         "G1": {"label": "net Sharpe >= 0.5", "value": sharpe(rbest), "pass": bool(sharpe(rbest) >= 0.5)},
         "G2": {"label": "deflated Sharpe >= 0.95", "value": dsr["dsr"], "pass": bool(dsr["dsr"] >= 0.95)},
@@ -129,9 +143,10 @@ def main() -> None:
     out = {"run_at_utc": pd.Timestamp.utcnow().isoformat(), "last_signal_date": str(pA.dates[-1].date()),
            "first_signal_date": str(pA.dates[0].date()), "days": int(len(pA.dates)),
            "universe_A": pA.meta, "universe_B": pB.meta, "trials": rows, "bias_mean_sharpe_diff_vs_A": bias,
-           "best_trial": tid, "dsr": dsr, "pbo": pbo, "year_stats": ys, "stress": stress, "gates": gates,
+           "spec": SPEC, "cost_kw": {k: str(v) for k, v in COST_KW[SPEC].items()}, "cost_sensitivity_best": sens,
+           "breakeven_oneway_bp": breakeven, "best_trial": tid, "dsr": dsr, "pbo": pbo, "year_stats": ys, "stress": stress, "gates": gates,
            "verdict": verdict, "participation": part, "seconds": round(time.time() - t0)}
-    (HERE / "results.json").write_text(json.dumps(out, indent=1, default=float))
+    (HERE / f"results_{SPEC}.json").write_text(json.dumps(out, indent=1, default=float))
     print("\nBEST", tid, "| gates", {k: g["pass"] for k, g in gates.items()}, "| verdict", verdict, flush=True)
 
 

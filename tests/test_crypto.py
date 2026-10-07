@@ -130,10 +130,30 @@ def test_delisting_event_is_explicit():
           f"events held {base.metrics['delist_events_held']}  PASS")
 
 
+def test_cost_model_is_not_fooled_by_volatility():
+    """The default cost model is bounded and does not depend on how volatile a contract is."""
+    rng = np.random.default_rng(9)
+    dates = pd.date_range("2022-01-01", periods=200, freq="D")
+    tick = [f"V{i:02d}" for i in range(12)]
+    close = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, 0.05, (200, 12)), axis=0)), index=dates, columns=tick)
+    hi, lo = close * 1.04, close * 0.96                               # about 8% daily range, like the crypto median
+    vol = pd.DataFrame(rng.lognormal(18, 0.2, (200, 12)), index=dates, columns=tick) / close
+    p = q.Panel(close=close, eligible=pd.DataFrame(True, index=dates, columns=tick), high=hi, low=lo, volume=vol,
+                market="CRYPTO", periods_per_year=365)
+    from quantbt.crypto import liquidity_cost_bp
+    import warnings
+    ok = liquidity_cost_bp(p).iloc[60:].stack()
+    assert ok.max() <= 12.0 + 1e-9, ok.max()                                  # fee 5 + half spread 2 (+5 if thin)
+    assert abs(liquidity_cost_bp(p, taker_fee_bp=8.0).iloc[60:].stack().max() - ok.max() - 3.0) < 1e-9   # fee passes straight through
+    print(f"C7 cost model  fixed, bounded by fee + half spread + thin penalty (max {ok.max():.1f} bp) however volatile the contract  PASS")
+
+
 if __name__ == "__main__":
     import warnings; warnings.filterwarnings("ignore")
     test_survivorship_and_stale_tail_and_min_age()
     test_pit_eligibility_has_no_lookahead()
     test_funding_sign_and_size()
     test_delisting_event_is_explicit()
+    test_cost_model_is_not_fooled_by_volatility()
     print("crypto tests: all passed")
+

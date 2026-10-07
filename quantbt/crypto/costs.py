@@ -1,13 +1,15 @@
-"""Liquidity-aware trading costs and capacity for crypto perpetuals.
+"""Trading costs and capacity for crypto perpetuals.
 
 There is no public order-book history in the archive, so costs here are *estimates*, and they are labelled as such.
 - Fees: a flat taker fee (default 5 bp, the standard retail tier). Change it to your tier.
-- Spread: Corwin-Schultz from daily highs and lows, smoothed with a trailing median and floored. It is noisy on
-  daily data and tends to understate the cost of thin contracts, so a liquidity floor is added.
+- Spread: a flat assumption plus a thin-contract penalty. A daily high-low estimator (Corwin-Schultz) was tried first
+  and rejected because it is invalid for crypto volatility (see `liquidity_cost_bp`).
 - Capacity: instead of pretending to model market impact without data, `participation_report` shows how large the
   trades are relative to each contract's turnover for a given account size.
 """
 from __future__ import annotations
+
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -15,17 +17,35 @@ import pandas as pd
 from ..core.costs import corwin_schultz
 
 
-def liquidity_cost_bp(panel, *, taker_fee_bp: float = 5.0, window: int = 30, floor_bp: float = 1.0,
-                      thin_usd: float = 2e7, thin_extra_bp: float = 5.0) -> pd.DataFrame:
-    """(date x ticker) one-way cost in bp = fee + half the estimated spread, with a liquidity floor.
+def liquidity_cost_bp(panel, *, taker_fee_bp: float = 5.0, half_spread_bp: float = 2.0, window: int = 30,
+                      thin_usd: float = 1e8, thin_extra_bp: float = 5.0,
+                      spread_estimator: str = "fixed") -> pd.DataFrame:
+    """(date x ticker) one-way cost in bp = taker fee + half spread (+ a penalty for thin contracts).
 
-    Uses only data up to day t. Contracts below `thin_usd` trailing turnover pay `thin_extra_bp` more, a blunt
-    penalty that stands in for impact we cannot measure."""
-    cs = corwin_schultz(panel.high, panel.low)                       # ratio
-    half_bp = (cs.rolling(window, min_periods=10).median() * 0.5 * 1e4).clip(lower=floor_bp)
+    spread_estimator
+      "fixed"           a flat half spread (`half_spread_bp`). The default. It is an assumption, not a measurement, so
+                        use `cost_sensitivity` or a grid of values instead of trusting one number.
+      "corwin_schultz"  half the Corwin-Schultz estimate from daily highs and lows. **Do not use it for crypto.**
+                        On Binance perpetuals it gave a median spread of about 1.5% and about 38 bp one way for
+                        BTC, orders of magnitude above any real quote (the study in `studies/crypto_cross_section`
+                        documents this in Amendment 1). I did not establish why; daily crypto ranges are dominated
+                        by jumps and volatility clustering, which the estimator's assumptions do not cover. It is
+                        kept only to reproduce the preregistered run.
+
+    Contracts whose trailing turnover is below `thin_usd` pay `thin_extra_bp` more, a blunt stand-in for impact.
+    Uses only data up to day t."""
     adv = panel.adv(window)
     extra = (adv < thin_usd).astype(float) * thin_extra_bp if adv is not None else 0.0
-    return (taker_fee_bp + half_bp + extra).astype(np.float64)
+    if spread_estimator == "corwin_schultz":
+        warnings.warn("Corwin-Schultz overstates crypto spreads by orders of magnitude; use only to reproduce old runs.",
+                      stacklevel=2)
+        cs = corwin_schultz(panel.high, panel.low)
+        half = (cs.rolling(window, min_periods=10).median() * 0.5 * 1e4).clip(lower=1.0)
+    elif spread_estimator == "fixed":
+        half = half_spread_bp
+    else:
+        raise ValueError(spread_estimator)
+    return (taker_fee_bp + half + extra).astype(np.float64)
 
 
 def participation_report(panel, weights: np.ndarray, aum_usd: float, window: int = 30) -> dict:
