@@ -86,3 +86,11 @@ wrong funding bar, a dropped partial bar) must be caught.
 - Quote volume is the archive's own, including wash trading, which is not filtered.
 - Binance only, perpetuals only, and only since about 2020 for most contracts.
 - A signal that works at one bar size and not at another is information about the signal, but nothing here tells you which is right.
+
+## Checked against real files (2026-10-07)
+The tests above use a fake archive, so the real format was checked separately with `docs/intraday_realdata_check.py`: Binance publishes
+1-day klines on their own, and 1-minute bars summed to days must equal them. For BTCUSDT 2024-01 and ETHUSDT 2024-03 (31 days, 44,640
+minutes each, none missing) open, high, low, close, quote volume and trade count are **identical**, volume differs by at most 1.3e-16, and
+the real file's header row is handled. The funding files hold exactly 3 settlements a day, 8 hours apart. Two symbols and two months
+are a check of the format and the parser, not of every contract (older files, delisted contracts and the microsecond-stamp files were
+not looked at).
