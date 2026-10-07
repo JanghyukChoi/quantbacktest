@@ -34,6 +34,22 @@ class PortfolioResult:
     grid: dict | None
     holdings: np.ndarray | None = None   # (date x ticker) net target weights, per unit of capital in each leg
     net_returns: pd.Series | None = None  # daily net return series (after costs and funding), for DSR / PBO
+    benchmark_returns: pd.Series | None = None  # return of the benchmark on the same dates (no costs), when one was asked for
+
+    def alpha_beta(self, factors=None, **kw) -> dict:
+        """Regress the net returns on `factors` (default: the benchmark, a market proxy). See `analytics.alpha_beta`."""
+        from .analytics import alpha_beta
+        if factors is None:
+            if self.benchmark_returns is None:
+                raise ValueError("no benchmark was computed; pass factors=... or run with benchmark='cap' or 'equal'")
+            factors = self.benchmark_returns.rename("benchmark")
+        kw.setdefault("periods_per_year", self.spec.get("periods_per_year", ANN))
+        return alpha_beta(self.net_returns, factors, **kw)
+
+    def sharpe_ci(self, **kw) -> dict:
+        from .analytics import sharpe_ci
+        kw.setdefault("periods_per_year", self.spec.get("periods_per_year", ANN))
+        return sharpe_ci(self.net_returns, **kw)
 
 
 def _tranche(weights: np.ndarray, hold: int) -> np.ndarray:
@@ -164,6 +180,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     m["avg_positions"] = float((hl > 0).sum(axis=1)[(hl > 0).sum(axis=1) > 0].mean())
 
     bench = bexc = None
+    bret = None
     if benchmark:
         if benchmark == "cap" and panel.mkt_cap is not None:
             w = np.where(ev, np.nan_to_num(panel.mkt_cap.values, nan=0.0), 0.0)
@@ -173,6 +190,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
         br = (bw * fwd).sum(axis=1)
         bench = metrics(br[:cut], panel.dates, panel.periods_per_year)
         bexc = metrics((net - br)[:cut], panel.dates, panel.periods_per_year)
+        bret = pd.Series(br[:cut], index=panel.dates[:cut], name="benchmark")
 
     s = pd.Series(net[:cut], index=panel.dates[:cut])
     yr = s.groupby(s.index.year).apply(lambda g: float((1 + g).prod() - 1))
@@ -201,12 +219,12 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
-              "entry_lag": panel.entry_lag, "market": panel.market,
+              "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": panel.periods_per_year,
               "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp 일괄",
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,
-        holdings=(hl - hs) if hs is not None else hl, net_returns=s)
+        holdings=(hl - hs) if hs is not None else hl, net_returns=s, benchmark_returns=bret)
 
 
 def assert_timing(panel: Panel) -> dict:

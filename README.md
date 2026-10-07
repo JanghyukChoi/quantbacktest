@@ -41,6 +41,23 @@ free of survivorship bias.
 | Parameter grids return the whole distribution | The user can see whether the best point is a plateau or a spike |
 | `backtest_portfolio(..., ledger=Ledger(dir), family=..., name=...)` records every run; `ledger.deflated_sharpe(family)` takes the trial count from the record | People under-report how many variants they tried. A rerun of the same configuration counts once; any change is a new trial. The file is hash-chained, so editing or deleting a line in the middle is detected. It sees only runs that go through it |
 
+## Reading a result
+
+```python
+r = q.backtest_portfolio(panel, factor, long_q=0.2, short_q=0.2, hold=5, spread_bp=10)
+r.alpha_beta()        # regress net returns on the benchmark: alpha, beta, R2, Newey-West t
+r.sharpe_ci()         # stationary block bootstrap interval for the Sharpe ratio
+q.analytics.ic_report(panel, factor, horizons=(1, 5, 20), delist_return=-0.3)   # rank IC, ICIR, NW t, hit rate
+q.analytics.sharpe_diff_ci(result_a.net_returns, result_b.net_returns)          # paired: is B really different from A?
+```
+
+| Tool | Default that avoids a common mistake |
+|---|---|
+| `alpha_beta` | Newey-West errors with the plug-in lag; refuses constant or collinear factors; dates aligned on the intersection. Its t-statistics still over-reject in finite samples (9% instead of 5% in the A4 test), so read |t| below about 2.5 as no evidence |
+| `information_coefficient`, `ic_report` | A name that stops trading earns 0 after its last bar, or `delist_return` if given, instead of a NaN that silently removes the losers from the test |
+| `sharpe_ci` | Block bootstrap keeps autocorrelation (an AR(1) of 0.3 widens the standard error 1.36x, matching theory). Intervals cover about 93% at a nominal 95% on 500 days |
+| `sharpe_diff_ci` | Both series are resampled on the same dates, so a small real difference is detectable (standard error 0.04 against 0.57 unpaired in the B3 test) |
+
 ## Install
 
 ```bash
@@ -148,6 +165,7 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmodels and scipy when installed, known answers, error rates
 ```
 
 | Test | Expectation |
@@ -166,6 +184,7 @@ python tests/test_ledger.py         # trial ledger: distinct configurations, DSR
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| A1 to A8, B1 to B3 | alpha and beta equal statsmodels' Newey-West regression to 1e-12 and IC equals scipy's Spearman (when installed), known answers and invariances, rejection rates on noise, forward returns equal a loop implementation with and without delisting returns, bootstrap coverage and standard errors against theory, a paired difference of identical series is exactly zero. Planting eight bugs in the module (wrong taper, shifted window, ignored delisting, unpaired resampling and others) is caught by these tests every time |
 | C1 to C8 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |
 
 ## Limits
