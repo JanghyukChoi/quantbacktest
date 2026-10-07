@@ -107,6 +107,19 @@ class Panel:
         exit_ = self.close.shift(-(lag + h))
         return (exit_ / entry - 1.0).astype(np.float32)
 
+    def fingerprint(self) -> str:
+        """Short hash of the data this panel holds (prices, eligibility, funding, delisting flags), used by the trial
+        ledger to tell whether two runs saw the same data."""
+        import hashlib
+        h = hashlib.sha256()
+        for name in ("close", "eligible", "funding", "delist_after"):
+            v = getattr(self, name)
+            if v is not None:
+                a = np.ascontiguousarray(v.to_numpy(dtype=np.float32))
+                h.update(name.encode() + repr(a.shape).encode() + a.tobytes())
+        h.update(f"{self.entry_lag}|{self.periods_per_year}|{self.market}".encode())
+        return h.hexdigest()[:16]
+
     def adv(self, window: int = 20) -> pd.DataFrame:
         """평균 거래대금. volume 이 없으면 None."""
         if self.volume is None:

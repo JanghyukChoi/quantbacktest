@@ -39,6 +39,7 @@ free of survivorship bias.
 | Mean and median are both reported (`skew_warning`) | If the signs differ, a few big winners hide many small losses. Fine for a portfolio, bad for an alert |
 | Multiple-testing thresholds come from a shuffled null, not Bonferroni | Bonferroni ignores the correlation between tests |
 | Parameter grids return the whole distribution | The user can see whether the best point is a plateau or a spike |
+| `backtest_portfolio(..., ledger=Ledger(dir), family=..., name=...)` records every run; `ledger.deflated_sharpe(family)` takes the trial count from the record | People under-report how many variants they tried. A rerun of the same configuration counts once; any change is a new trial. The file is hash-chained, so editing or deleting a line in the middle is detected. It sees only runs that go through it |
 
 ## Install
 
@@ -145,6 +146,8 @@ python tests/test_validation.py     # deflated Sharpe, PBO, permutation test: no
 python tests/test_crypto.py         # survivorship, point-in-time eligibility, stale bars, delisting, funding sign, costs
 python tests/test_krx.py            # Korea: delisted names kept, split-day return, listing day, code reuse, resumable fetch
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
+python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
+python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
 ```
 
 | Test | Expectation |
@@ -161,6 +164,8 @@ python tests/test_equity.py         # equity tools: delisting scenarios (known a
 | V1 to V3 | deflated Sharpe, PBO and permutation p-value: noise looks like noise, a real edge is caught |
 | K1 to K5 | Korean adapter: a stock gone by the end is in the panel and flagged, a 50:1 split leaves the return unchanged, the listing-day move is dropped, a returning code becomes a new security, fetching resumes and stops cleanly on a quota error |
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
+| R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
+| L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
 | C1 to C8 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |
 
 ## Limits

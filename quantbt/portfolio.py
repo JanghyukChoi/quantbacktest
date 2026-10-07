@@ -75,7 +75,7 @@ def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
     recov = rec[rec >= eq.loc[peak]].index
     return {"CAGR": float(cagr), "MDD": float(mdd),
             "Sharpe": float(s.mean() / (s.std() + 1e-12) * np.sqrt(ann)),
-            "Sortino": float(s.mean() * ann / (s[s < 0].std() * np.sqrt(ann) + 1e-12)),
+            "Sortino": float(s.mean() / (np.sqrt(np.mean(np.minimum(s.to_numpy(), 0.0) ** 2)) + 1e-12) * np.sqrt(ann)),  # downside deviation, target 0
             "Calmar": float(cagr / abs(mdd)) if mdd < 0 else np.nan,
             "vol": float(s.std() * np.sqrt(ann)),
             "years": float(yrs), "pos_days": float((s > 0).mean()),
@@ -88,15 +88,20 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        hold: int = 5, weighting: str = "equal",
                        spread_bp=20.0, benchmark: str | None = "cap",
                        grid: bool = True, funding: bool = True,
-                       delist_return: float | None = None) -> PortfolioResult:
+                       delist_return: float | None = None,
+                       ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
     """팩터 → 포트폴리오 성과.
 
     factor      연속 팩터 (높을수록 롱). bool 이면 롱온리 발화로 해석.
     long_q      롱 분위 (상위 q). short_q=None 이면 롱온리.
     weighting   equal | signal (신호강도 비례) | rank
-    spread_bp   스칼라 또는 (date × ticker) 편도 스프레드 패널
+    spread_bp   **단위가 두 가지다.** 스칼라는 왕복(round trip) 스프레드: 거래한 비중 1단위당 spread_bp/2 를 낸다
+                (편도 비용 c bp 를 쓰려면 2*c 를 넘긴다). (date × ticker) 패널은 편도(one-way) 비용 bp 그대로
+                거래한 비중에 곱한다. 스칼라 20 == 패널 10 이다(tests/test_reconcile.py 가 고정한다).
     benchmark   cap(시총가중) | equal(동일가중) | None
     funding     panel.funding 이 있으면 롱은 지불, 숏은 수취로 반영 (선물). False 면 무시
+    ledger      quantbt.ledger.Ledger. 주면 이 실행을 장부에 기록한다(시도 횟수를 deflated Sharpe 에 자동 반영하려고).
+    family      장부에서 같은 연구 질문을 묶는 이름. name 은 이 시도의 라벨(같은 라벨이어도 설정이 다르면 다른 시도).
     delist_return  panel.delist_after 로 표시된 종목의 마지막 실제 봉 **다음 날** 수익률 가정.
                 None 이면 0 (마지막 가격에 청산됐다고 가정 — 낙관적일 수 있음). 예: -0.5 로 민감도를 본다.
     """
@@ -187,6 +192,13 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                 mm = metrics((gr - co)[:cut], panel.dates, panel.periods_per_year)
                 g[f"h{h}_c{c}"] = {"CAGR": mm["CAGR"], "Sharpe": mm["Sharpe"], "MDD": mm["MDD"]}
 
+    if ledger is not None:
+        from .ledger import array_fingerprint
+        ledger.record(family, name or "unnamed", s, {
+            "long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
+            "spread_bp": spread_bp if np.isscalar(spread_bp) else array_fingerprint(spread_bp),
+            "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
+            "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
               "entry_lag": panel.entry_lag, "market": panel.market,
