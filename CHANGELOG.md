@@ -9,6 +9,10 @@
 - `pitbacktest.analytics`: alpha and beta with Newey-West errors, rank IC with delisted names kept, stationary-bootstrap Sharpe intervals
   and a paired difference. Cross-checked against statsmodels and scipy.
 - `pitbacktest.weights`: `backtest_weights` (spread, borrow, square-root market impact), `capacity_curve`, with a point-in-time universe guard.
+- `pitbacktest.crypto.intraday`: Binance 1-minute bars aggregated to any bar that divides a day, a point-in-time panel (rows labelled by bar end,
+  eligibility one day behind, funding at the settlement instant), `latency_sweep` and `breakeven_cost`, with a measured memory guard.
+  Design in `docs/intraday_design.md`.
+- Annualised metrics from a sample shorter than half a year now **warn** instead of returning NaN silently.
 - `pitbacktest.adapters.tiingo`: random-sample downloader and panel builder that keeps delisted securities (free account).
 - `pitbacktest.adapters.krx`: official KRX OpenAPI adapter; Korean survivorship study in `studies/korea_survivorship`.
 - `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.

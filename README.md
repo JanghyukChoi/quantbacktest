@@ -80,6 +80,31 @@ q.capacity_curve(panel, weights, aums=[1e6, 5e6, 25e6, 100e6], y_values=(0.5, 1.
 | It reports participation (p99, max, share of trades above 10% of ADV) next to the cost | The square-root law is least reliable at high participation; look at both |
 | Costs are on the net trade per name | `backtest_portfolio` charges its two legs as separate sleeves; with overlapping tranches the two can differ by the netting saving |
 
+## Intraday bars (Binance, 1 minute and up)
+
+```python
+from pitbacktest.crypto import intraday as ib, ArchiveStore
+store = ArchiveStore()
+ib.fetch_minutes(store, ["BTCUSDT", "ETHUSDT", ...], "2024-01-01", "2024-06-30")          # monthly zips, resumable, no key
+panel = ib.build_intraday_panel(store, symbols, "2024-01-01", "2024-06-30", bar="5min", top_n=30)
+ib.latency_sweep(panel, factor, lags=(1, 2, 5, 15), one_way_bp=4)      # the same signal entered k bars late
+ib.breakeven_cost(panel, factor)                                       # one-way bp at which the net mean is zero
+```
+
+What it answers: how fast an edge decays with latency, and at what cost it stops paying. What it cannot: whether the signal can
+be traded. The archive has bars, not an order book, so there is no queue, no partial fill and no impact below the bar. See
+`docs/intraday_design.md`.
+
+| Choice | Why |
+|---|---|
+| Rows are labelled by bar **end**, and `entry_lag` below 1 is refused | A bar's close is only known when it ends; trading on it is look-ahead |
+| Eligibility for every bar of day D uses days up to D - 1 | Day D's own volume must not decide whether D's bars are in the universe |
+| Only the terminal run of zero-volume bars is removed; a no-trade stretch inside a contract's life keeps its price | Deleting it leaves a hole whose crossing return the engine would drop |
+| Funding keeps its settlement instant (daily sums lose it) | A position held through the settlement pays it, and a flat one does not |
+| `one_way_bp` instead of the engine's round-trip scalar | One unit trap fewer |
+| A memory estimate, measured and not assumed, and a refusal with a bar length that fits | A year of 1-minute bars for 40 contracts needs about 3.4 GB |
+| Annualised metrics from under half a year warn instead of returning NaN silently | Intraday studies are often a few months |
+
 ## Install
 
 Not on PyPI yet (the planned name is `pitbacktest`; import it as `pitbacktest`). From a clone:
@@ -192,6 +217,7 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_intraday.py        # intraday layer on a fake archive: parsing, aggregation, point in time, latency, funding, break-even, memory, download
 python tests/test_packaging.py       # version, Python floor, CI matrix and classifiers agree
 python tests/smoke_installed.py     # run from outside the repo against an installed wheel (what the CI package job does)
 python tests/test_weights.py        # weights: equals the engine, plain-loop reference with all costs, known answers, guard rails, capacity curve
@@ -215,6 +241,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| I1 to I10, I11 | 1-minute parsing in both timestamp units, aggregation equal to an independent loop, eligibility one day behind (first eligible bar is the listing day + 5 whole days), a knows-one-bar-ahead signal earns at lag 1 and nothing at lag 2, funding paid exactly once per settlement, break-even cost makes the net mean zero, memory guard, resumable download with recorded 404s, halts and no-trade stretches. Planted bugs (shifted labels, same-day eligibility, wrong funding bar, dropped partial bars and others) are caught |
 | P1, P2 | the version is the same in pyproject, `__version__` and the changelog; the declared Python floor, the classifiers and the CI matrix agree, and the matrix tests the oldest declared pandas and numpy |
 | R8 | `neutralize` equals a least-squares solution; a factor inside the controls' span gives NaN even with rounding noise (found because the old behaviour made one test fail on Python 3.10 only) |
 | W1 to W6 | `backtest_weights` equals the engine on the engine's own holdings (exactly, except for a netting saving it documents), equals a plain-loop implementation with spread, borrow and impact, impact matches a hand calculation and scales as sqrt(AUM) and linearly in Y, borrow follows its formula, the untradable cap is exact, guard rails, capacity curve shape. Ten planted bugs are all caught |

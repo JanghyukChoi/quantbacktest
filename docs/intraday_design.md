@@ -29,7 +29,7 @@ the bar is finished, so the intraday builder refuses `entry_lag < 1`.)
 Coarser bars (`bar="5min"`, `"15min"`, `"1h"`) are aggregated from 1-minute bars: open first, high max, low min, close last,
 volume and quote volume summed, labelled by their end. A last bar that would end after the data ends is dropped. A minute with no
 trade is missing (NaN), not zero; a bar with no minute at all is NaN, and the engine's rule for a missing price (cash, return 0)
-applies. Bars with zero quote volume (halts, the tail before a delisting) are removed as in the daily panel. The number of partial
+applies. Only the **terminal run** of zero-quote-volume bars of a contract (a halted or delisted contract keeps printing flat bars) is removed. Zero-volume bars inside a contract's life are kept with their price: a minute without a trade is normal for a thin contract, and deleting it would leave a price hole whose crossing return the engine would drop (it counts a missing price as cash). The count of such kept bars is reported in `panel.meta`. (Design changed while writing the code; the first draft said to remove them all, as the daily panel does.) The number of partial
 bars (fewer minutes than the bar length) is reported in `panel.meta`.
 
 ## Point-in-time universe
@@ -59,9 +59,12 @@ Sharpe, CAGR and turnover per lag, with the delay in minutes. A real edge decays
 gone at lag 2 is a bar-alignment artefact or a signal nobody can trade.
 
 ## Size
-One year of 1-minute bars is about 525,600 rows; for 40 contracts that is 21 million cells per matrix and the engine holds around eight
-of them. `estimate_memory` is called before building and the builder raises if the estimate is above `max_gb` (default 3), naming the
-bar length that would fit. Practical limits: 1-minute bars for a few months and a few dozen contracts, 5-minute bars for a year.
+One year of 1-minute bars is about 525,600 rows; for 40 contracts that is 21 million cells, 0.17 GB per float64 matrix. **Measured**
+(not assumed): `backtest_portfolio` peaked at about 14 such matrices on a panel carrying close, eligible and volume (0.58 GB for
+131,400 bars x 40 contracts, the same for 262,800 x 20), and the panel built by `build_intraday_panel` carries more (open, high,
+low, funding, delisting flags). `estimate_memory` therefore uses 20 matrices, and the builder raises if the estimate is above
+`max_gb` (default 3), naming the bar length that would fit. By that estimate one year of 1-minute bars for 40 contracts needs about
+3.4 GB and is refused, 5-minute bars need 0.7 GB. (The first draft assumed 8 matrices; the measurement said otherwise.)
 
 ## Annualisation and short samples
 `periods_per_year = 365 * 1440 / bar_minutes` (the market never closes). `backtest_portfolio` already returns NaN metrics for a

@@ -7,5 +7,6 @@ to the signal date) and ignored funding (the daily funding rate is charged to th
 from .binance_archive import ArchiveStore, fetch_all
 from .panel import build_panel
 from .costs import liquidity_cost_bp, participation_report
+from . import intraday
 
-__all__ = ["ArchiveStore", "fetch_all", "build_panel", "liquidity_cost_bp", "participation_report"]
+__all__ = ["ArchiveStore", "fetch_all", "build_panel", "liquidity_cost_bp", "participation_report", "intraday"]

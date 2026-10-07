@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -79,6 +80,9 @@ def _normalize(mask_or_w: np.ndarray) -> np.ndarray:
 def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
     s = pd.Series(net, index=dates[: len(net)]).dropna()
     if len(s) < ann // 2:
+        # Annualised figures from under half a year are not reported. Say so: a NaN with no explanation looks like a bug, and
+        # intraday studies are often a few months long.
+        warnings.warn(f"only {len(s):,} observations = {len(s) / ann:.2f} years (< 0.5): CAGR, MDD and Sharpe are NaN", stacklevel=2)
         return {"CAGR": np.nan, "MDD": np.nan, "Sharpe": np.nan}
     eq = (1 + s).cumprod()
     yrs = len(s) / ann
