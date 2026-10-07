@@ -33,6 +33,7 @@ class PortfolioResult:
     yearly: dict
     grid: dict | None
     holdings: np.ndarray | None = None   # (date x ticker) net target weights, per unit of capital in each leg
+    net_returns: pd.Series | None = None  # daily net return series (after costs and funding), for DSR / PBO
 
 
 def _tranche(weights: np.ndarray, hold: int) -> np.ndarray:
@@ -193,7 +194,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,
-        holdings=(hl - hs) if hs is not None else hl)
+        holdings=(hl - hs) if hs is not None else hl, net_returns=s)
 
 
 def assert_timing(panel: Panel) -> dict:

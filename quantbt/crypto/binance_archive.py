@@ -34,6 +34,7 @@ UA = {"User-Agent": "quantbt-research/0.2 (public data only)"}
 
 def _get(url: str, retries: int = 4, timeout: float = 30) -> bytes | None:
     """GET with backoff. Returns None on 404 (a missing archive file is normal)."""
+    url = urllib.parse.quote(url, safe=":/?&=%")                  # non-ASCII symbols (e.g. Chinese tickers) need encoding
     delay = 1.0
     for i in range(retries + 1):
         try:
