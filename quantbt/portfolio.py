@@ -32,6 +32,7 @@ class PortfolioResult:
     excess: dict | None
     yearly: dict
     grid: dict | None
+    holdings: np.ndarray | None = None   # (date x ticker) net target weights, per unit of capital in each leg
 
 
 def _tranche(weights: np.ndarray, hold: int) -> np.ndarray:
@@ -85,7 +86,8 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
                        hold: int = 5, weighting: str = "equal",
                        spread_bp=20.0, benchmark: str | None = "cap",
-                       grid: bool = True) -> PortfolioResult:
+                       grid: bool = True, funding: bool = True,
+                       delist_return: float | None = None) -> PortfolioResult:
     """팩터 → 포트폴리오 성과.
 
     factor      연속 팩터 (높을수록 롱). bool 이면 롱온리 발화로 해석.
@@ -93,15 +95,30 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     weighting   equal | signal (신호강도 비례) | rank
     spread_bp   스칼라 또는 (date × ticker) 편도 스프레드 패널
     benchmark   cap(시총가중) | equal(동일가중) | None
+    funding     panel.funding 이 있으면 롱은 지불, 숏은 수취로 반영 (선물). False 면 무시
+    delist_return  panel.delist_after 로 표시된 종목의 마지막 실제 봉 **다음 날** 수익률 가정.
+                None 이면 0 (마지막 가격에 청산됐다고 가정 — 낙관적일 수 있음). 예: -0.5 로 민감도를 본다.
     """
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
     rk = f.where(el).rank(axis=1, pct=True, na_option="keep")
     ret = np.nan_to_num(panel.ret1().values.astype(np.float64), nan=0.0)
     # 신호 d → 진입 close(d+lag) → 수익 close(d+lag)→close(d+lag+1)
+    nxt = np.zeros(ret.shape, dtype=bool)
+    if panel.delist_after is not None:
+        da = panel.delist_after.reindex(index=panel.dates, columns=panel.tickers).fillna(False).values.astype(bool)
+        nxt[1:] = da[:-1]                                   # the day after the last real bar
+        if delist_return is not None:
+            ret = np.where(nxt, float(delist_return), ret)
     fwd = np.roll(ret, -(panel.entry_lag + 1), axis=0)
     fwd[-(panel.entry_lag + 1):] = 0.0
     ev = el.values
+    fwdf = np.zeros(ret.shape)
+    if funding and panel.funding is not None:
+        fd = np.nan_to_num(panel.funding.reindex(index=panel.dates, columns=panel.tickers).values.astype(np.float64), nan=0.0)
+        fwdf = np.roll(fd, -(panel.entry_lag + 1), axis=0)
+        fwdf[-(panel.entry_lag + 1):] = 0.0
+    hit_next = np.roll(nxt, -(panel.entry_lag + 1), axis=0)
 
     def leg(q: float, top: bool) -> np.ndarray:
         m = ((rk >= 1 - q) if top else (rk <= q)) & el
@@ -119,18 +136,25 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     gross = (hl * fwd).sum(axis=1)
     cost = apply_turnover_cost(hl, spread_bp)
     turn = turnover(hl)
+    fcost = (hl * fwdf).sum(axis=1)                     # longs pay a positive funding rate
+    held = hl > 0
+    hs = None
     if short_q:
         hs = _tranche(leg(short_q, False), hold)
         gross = gross - (hs * fwd).sum(axis=1)
         cost = cost + apply_turnover_cost(hs, spread_bp)
         turn = turn + turnover(hs)
-    net = gross - cost
+        fcost = fcost - (hs * fwdf).sum(axis=1)         # shorts receive it
+        held = held | (hs > 0)
+    net = gross - cost - fcost
 
     cut = len(panel.dates) - (panel.entry_lag + 1)
     m = metrics(net[:cut], panel.dates, panel.periods_per_year)
     m["turnover_daily"] = float(turn[:cut].mean())
     m["cost_annual_bp"] = float(cost[:cut].mean() * panel.periods_per_year * 1e4)
     m["gross_CAGR"] = metrics(gross[:cut], panel.dates, panel.periods_per_year)["CAGR"]
+    m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
+    m["delist_events_held"] = int((held & hit_next)[:cut].sum())
     m["avg_positions"] = float((hl > 0).sum(axis=1)[(hl > 0).sum(axis=1) > 0].mean())
 
     bench = bexc = None
@@ -154,20 +178,22 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             for c in (0, 2, 5, 10, 20):
                 hl2 = _tranche(leg(long_q, True), h)
                 gr = (hl2 * fwd).sum(axis=1)
-                co = apply_turnover_cost(hl2, c)
+                co = apply_turnover_cost(hl2, c) + (hl2 * fwdf).sum(axis=1)
                 if short_q:
                     hs2 = _tranche(leg(short_q, False), h)
                     gr = gr - (hs2 * fwd).sum(axis=1)
-                    co = co + apply_turnover_cost(hs2, c)
+                    co = co + apply_turnover_cost(hs2, c) - (hs2 * fwdf).sum(axis=1)
                 mm = metrics((gr - co)[:cut], panel.dates, panel.periods_per_year)
                 g[f"h{h}_c{c}"] = {"CAGR": mm["CAGR"], "Sharpe": mm["Sharpe"], "MDD": mm["MDD"]}
 
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
               "entry_lag": panel.entry_lag, "market": panel.market,
-              "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp 일괄"},
+              "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp 일괄",
+              "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
-        yearly={str(k): v for k, v in yr.items()}, grid=g)
+        yearly={str(k): v for k, v in yr.items()}, grid=g,
+        holdings=(hl - hs) if hs is not None else hl)
 
 
 def assert_timing(panel: Panel) -> dict:

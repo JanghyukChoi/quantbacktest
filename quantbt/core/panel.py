@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 REQUIRED = ("close", "eligible")
-OPTIONAL = ("open", "high", "low", "volume", "mkt_cap")
+OPTIONAL = ("open", "high", "low", "volume", "mkt_cap", "funding", "delist_after")
 
 
 @dataclass
@@ -45,6 +45,10 @@ class Panel:
     entry_lag: int = 1
     # 연율화에 쓰는 연간 거래일. 주식 252, 24/7 시장(크립토)은 365 로 둔다. 잘못 두면 CAGR, 샤프, 변동성이 틀린다.
     periods_per_year: int = 252
+    # 선택: 선물 펀딩비(날짜 x 종목, 일합계, 양수면 롱이 지불). 상장폐지 표시(마지막 실제 봉이면 True). 어댑터 메모.
+    funding: pd.DataFrame | None = None
+    delist_after: pd.DataFrame | None = None
+    meta: dict = field(default_factory=dict)
 
     # ---------------------------------------------------------------- 생성·검증
     def __post_init__(self) -> None:
@@ -60,6 +64,8 @@ class Panel:
             k: v.reindex(index=self.close.index, columns=self.close.columns)
             for k, v in self.chars.items()
         }
+        if self.delist_after is not None:
+            self.delist_after = self.delist_after.fillna(False).astype(bool)
         self.validate()
 
     def validate(self) -> None:
@@ -88,7 +94,7 @@ class Panel:
 
     def ret1(self) -> pd.DataFrame:
         """일간 수익률 close(t)/close(t-1) − 1."""
-        return self.close.pct_change()
+        return self.close.pct_change(fill_method=None)
 
     def forward(self, h: int) -> pd.DataFrame:
         """신호 t 기준 미래 h일 누적 수익률.

@@ -17,7 +17,8 @@ from .core.gates import GateConfig
 from .event import backtest_event
 from .portfolio import backtest_portfolio, assert_timing
 from .screen import screen
+from . import validation
 
 __version__ = "0.1.0"
-__all__ = ["Panel", "build_pit_eligible", "GateConfig", "screen",
+__all__ = ["validation", "Panel", "build_pit_eligible", "GateConfig", "screen",
            "backtest_event", "backtest_portfolio", "assert_timing"]
