@@ -1,0 +1,20 @@
+[project]
+name = "quantbt"
+version = "0.1.0"
+description = "Backtest harness for factor screening, event signals and portfolio alphas, built to make common backtest errors hard"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Janghyuk Choi" }]
+requires-python = ">=3.10"
+dependencies = ["pandas>=2.0", "numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+yfinance = ["yfinance"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["quantbt*"]
