@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -25,7 +26,13 @@ def main() -> int:
     print(f"frame {len(order)} tickers; target {TARGET} with prices", flush=True)
     for i in range(0, len(order), CHUNK):
         part = order[i:i + CHUNK]
-        r = tiingo.fetch_symbols(part, STORE, key=key, sleep=0.4, progress=False)
+        while True:
+            r = tiingo.fetch_symbols(part, STORE, key=key, sleep=0.4, progress=False)
+            if r["stopped"] and "hourly" in r["stopped"]:        # the free tier allows a fixed number per hour: wait and resume
+                print("hourly allocation used up; waiting an hour", flush=True)
+                time.sleep(3700)
+                continue
+            break
         have = sum((STORE / f"{tiingo._safe(t)}.json").exists() for t in order[:i + CHUNK])
         none = sum((STORE / f"{tiingo._safe(t)}.none").exists() for t in order[:i + CHUNK])
         print(f"prefix {i + len(part)}: {have} with prices, {none} none  ({r['calls']} requests this chunk)", flush=True)
