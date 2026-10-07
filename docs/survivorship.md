@@ -28,6 +28,11 @@ Two separate problems, and the second is the worse one:
 - The crypto path (`quantbt.crypto`) does not have the problem: the Binance archive keeps delisted contracts, and 42%
   of the USDT perpetuals ever listed are delisted or halted. `survivors_only=True` reproduces the shortcut so the
   bias can be measured (`studies/crypto_cross_section`).
+- Korea can be done without bias for free: the official KRX OpenAPI returns every stock listed on each day. On
+  2013-2026 data (`studies/korea_survivorship`), running four factors on survivors only instead changes the net
+  Sharpe by -0.23 to +0.20 depending on the factor (low volatility is understated, small size overstated), and by
+  about zero on average. 13% of eligible security-days in 2013 belong to stocks no longer listed. The sign differs by
+  factor, so "survivorship inflates returns" is not a safe assumption to correct for.
 - `backtest_portfolio(..., delist_return=...)` takes an explicit return for a name that leaves the sample. For US equities
   the literature gives sensible sensitivity values: about -30% for performance-related NYSE/AMEX delistings
   (Shumway 1997) and about -55% for Nasdaq (Shumway and Warther 1999).
