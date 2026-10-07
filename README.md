@@ -58,6 +58,26 @@ q.analytics.sharpe_diff_ci(result_a.net_returns, result_b.net_returns)          
 | `sharpe_ci` | Block bootstrap keeps autocorrelation (an AR(1) of 0.3 widens the standard error 1.36x, matching theory). Intervals cover about 93% at a nominal 95% on 500 days |
 | `sharpe_diff_ci` | Both series are resampled on the same dates, so a small real difference is detectable (standard error 0.04 against 0.57 unpaired in the B3 test) |
 
+## Your own weights, costs and capacity
+
+`backtest_portfolio` builds quantile portfolios from a factor. Institutions separate the steps: signal, portfolio
+construction (an optimiser with risk and turnover limits), simulation. `backtest_weights` is the third step: give it the
+weights your optimiser produced. The library does not ship an optimiser on purpose.
+
+```python
+w = q.backtest_weights(panel, weights, spread_bp=10, borrow_bp=300,
+                       impact=q.ImpactModel(aum=50e6, y=1.0))        # square-root impact: Y * sigma * sqrt(|trade| * AUM / ADV)
+q.capacity_curve(panel, weights, aums=[1e6, 5e6, 25e6, 100e6], y_values=(0.5, 1.0, 2.0), spread_bp=10)
+```
+
+| Choice | Why |
+|---|---|
+| Opening or increasing a position in a name that is not eligible that day raises | An optimiser that buys outside the point-in-time universe is using information it should not have. Holding a name that left is allowed |
+| The impact coefficient is a parameter and the capacity function takes a list of them | Y is of order 1 in the literature but unknown for a given market; one capacity number would be false precision |
+| Unknown volatility or volume is charged the cap (100 bp per unit traded by default), never zero | A name you cannot size is not free to trade |
+| It reports participation (p99, max, share of trades above 10% of ADV) next to the cost | The square-root law is least reliable at high participation; look at both |
+| Costs are on the net trade per name | `backtest_portfolio` charges its two legs as separate sleeves; with overlapping tranches the two can differ by the netting saving |
+
 ## Install
 
 ```bash
@@ -122,7 +142,7 @@ print(participation_report(panel, res.holdings, aum_usd=10e6))
 `studies/crypto_cross_section/` is a worked, preregistered example: four factors, 12 trials, five gates. It is **not
 validated**, and the README there explains what the biases changed and what went wrong along the way.
 
-Still not modelled: market impact beyond the thin-contract penalty (no order book in the archive), the settlement price of a
+Still not modelled for crypto: market impact beyond the thin-contract penalty (use `backtest_weights` with `ImpactModel` for a square-root estimate), the settlement price of a
 delisted contract after its last bar, borrow limits and margin, and anything outside Binance.
 
 ## Equities: Korea and the US
@@ -165,6 +185,7 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_weights.py        # weights: equals the engine, plain-loop reference with all costs, known answers, guard rails, capacity curve
 python tests/test_tiingo.py         # Tiingo adapter offline: delisting kept, windows cut, resumable, quota stop, point in time, loud failures
 python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmodels and scipy when installed, known answers, error rates
 ```
@@ -185,6 +206,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| W1 to W6 | `backtest_weights` equals the engine on the engine's own holdings (exactly, except for a netting saving it documents), equals a plain-loop implementation with spread, borrow and impact, impact matches a hand calculation and scales as sqrt(AUM) and linearly in Y, borrow follows its formula, the untradable cap is exact, guard rails, capacity curve shape. Ten planted bugs are all caught |
 | U1 to U8 | Tiingo adapter against a fake API: a delisted security is kept and flagged, a split does not move the return, a sub-dollar stock is never eligible, a reused ticker becomes two securities, a quota stops cleanly and resumes, eligibility ignores the future, the sample draw is seeded, malformed answers leave no file. Nine planted bugs are all caught |
 | A1 to A8, B1 to B3 | alpha and beta equal statsmodels' Newey-West regression to 1e-12 and IC equals scipy's Spearman (when installed), known answers and invariances, rejection rates on noise, forward returns equal a loop implementation with and without delisting returns, bootstrap coverage and standard errors against theory, a paired difference of identical series is exactly zero. Planting eight bugs in the module (wrong taper, shifted window, ignored delisting, unpaired resampling and others) is caught by these tests every time |
 | C1 to C8 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |

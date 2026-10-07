@@ -99,6 +99,42 @@ def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
             "mdd_recovered": str(recov[0].date()) if len(recov) else "미회복"}
 
 
+def _forward_arrays(panel: Panel, funding: bool, delist_return: float | None):
+    """The three (date x ticker) arrays every simulation needs, indexed by the **signal date** d:
+    fwd[d]       return from close(d + lag) to close(d + lag + 1); a missing price earns 0 (cash), and the day after a
+                 delisting flagged in `panel.delist_after` earns `delist_return` when it is given
+    fwdf[d]      funding rate over the same day (0 unless `funding` and the panel has it); positive means longs pay
+    hit_next[d]  True where that day is the delisting day
+    The last lag + 1 rows of fwd and fwdf are 0: their holding period is not in the sample."""
+    ret = np.nan_to_num(panel.ret1().values.astype(np.float64), nan=0.0)
+    nxt = np.zeros(ret.shape, dtype=bool)
+    if panel.delist_after is not None:
+        da = panel.delist_after.reindex(index=panel.dates, columns=panel.tickers).fillna(False).values.astype(bool)
+        nxt[1:] = da[:-1]                                   # the day after the last real bar
+        if delist_return is not None:
+            ret = np.where(nxt, float(delist_return), ret)
+    k = panel.entry_lag + 1
+    fwd = np.roll(ret, -k, axis=0)
+    fwd[-k:] = 0.0
+    fwdf = np.zeros(ret.shape)
+    if funding and panel.funding is not None:
+        fd = np.nan_to_num(panel.funding.reindex(index=panel.dates, columns=panel.tickers).values.astype(np.float64), nan=0.0)
+        fwdf = np.roll(fd, -k, axis=0)
+        fwdf[-k:] = 0.0
+    return fwd, fwdf, np.roll(nxt, -k, axis=0)
+
+
+def _benchmark_returns(panel: Panel, fwd: np.ndarray, kind: str) -> np.ndarray:
+    """Daily return (indexed by signal date, like `fwd`) of the benchmark: market-cap weighted when `kind` is "cap" and the
+    panel has market caps, otherwise equal weighted, over the securities eligible that day. No costs."""
+    ev = panel.eligible.values
+    if kind == "cap" and panel.mkt_cap is not None:
+        w = np.where(ev, np.nan_to_num(panel.mkt_cap.values, nan=0.0), 0.0)
+    else:
+        w = ev.astype(float)
+    return (_normalize(w) * fwd).sum(axis=1)
+
+
 def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
                        hold: int = 5, weighting: str = "equal",
@@ -124,23 +160,8 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
     rk = f.where(el).rank(axis=1, pct=True, na_option="keep")
-    ret = np.nan_to_num(panel.ret1().values.astype(np.float64), nan=0.0)
-    # 신호 d → 진입 close(d+lag) → 수익 close(d+lag)→close(d+lag+1)
-    nxt = np.zeros(ret.shape, dtype=bool)
-    if panel.delist_after is not None:
-        da = panel.delist_after.reindex(index=panel.dates, columns=panel.tickers).fillna(False).values.astype(bool)
-        nxt[1:] = da[:-1]                                   # the day after the last real bar
-        if delist_return is not None:
-            ret = np.where(nxt, float(delist_return), ret)
-    fwd = np.roll(ret, -(panel.entry_lag + 1), axis=0)
-    fwd[-(panel.entry_lag + 1):] = 0.0
+    fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     ev = el.values
-    fwdf = np.zeros(ret.shape)
-    if funding and panel.funding is not None:
-        fd = np.nan_to_num(panel.funding.reindex(index=panel.dates, columns=panel.tickers).values.astype(np.float64), nan=0.0)
-        fwdf = np.roll(fd, -(panel.entry_lag + 1), axis=0)
-        fwdf[-(panel.entry_lag + 1):] = 0.0
-    hit_next = np.roll(nxt, -(panel.entry_lag + 1), axis=0)
 
     def leg(q: float, top: bool) -> np.ndarray:
         m = ((rk >= 1 - q) if top else (rk <= q)) & el
@@ -182,12 +203,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     bench = bexc = None
     bret = None
     if benchmark:
-        if benchmark == "cap" and panel.mkt_cap is not None:
-            w = np.where(ev, np.nan_to_num(panel.mkt_cap.values, nan=0.0), 0.0)
-        else:
-            w = ev.astype(float)
-        bw = _normalize(w)
-        br = (bw * fwd).sum(axis=1)
+        br = _benchmark_returns(panel, fwd, benchmark)
         bench = metrics(br[:cut], panel.dates, panel.periods_per_year)
         bexc = metrics((net - br)[:cut], panel.dates, panel.periods_per_year)
         bret = pd.Series(br[:cut], index=panel.dates[:cut], name="benchmark")
