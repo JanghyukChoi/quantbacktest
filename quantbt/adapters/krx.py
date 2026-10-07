@@ -72,7 +72,7 @@ def _call(path: str, date: str, key: str, retries: int = 4) -> list[dict]:
                 time.sleep(delay); delay *= 2
                 continue
             raise
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
+        except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError):   # ValueError: an empty or non-JSON body
             if i < retries:
                 time.sleep(delay); delay *= 2
                 continue
@@ -115,6 +115,9 @@ def fetch_days(start, end, store_dir, *, key: str | None = None, markets=("KOSPI
         except QuotaExceeded as e:
             done["stopped"] = f"quota: {e}"
             break
+        if frames and len(frames) < len(markets) and caller is None:
+            done.setdefault("partial", []).append(d)                   # one market answered empty: do not save, retry next run
+            continue
         if frames:
             pd.concat(frames).to_pickle(store / f"{d}.pkl")
             done["days"] += 1

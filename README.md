@@ -9,6 +9,17 @@ It is not a strategy and ships no data. Its purpose is to make the usual backtes
 one timing convention that is asserted in code, controls for firm characteristics by default, and reporting
 that refuses to show an impressive raw number before the controls are applied.
 
+## Markets
+
+The engine works on any date x security panel. What differs between markets is the **data path** and whether it is
+free of survivorship bias.
+
+| Market | Data path | Survivorship-free? | Status |
+|---|---|---|---|
+| Crypto perpetuals (Binance) | `quantbt.crypto`, public archive | **Yes**: 900 contracts ever listed, 376 of them delisted or halted. Funding charged, delistings explicit | Tested; preregistered study in `studies/crypto_cross_section` |
+| Korean stocks | `quantbt.adapters.krx`, official KRX OpenAPI (free key) | **Yes**: the API returns every stock listed on each day, so later delistings are inside the history. Adjusted returns come from the change versus the reference price, no price-adjustment table needed | Return formula checked on live data (all 953 KOSPI names on 2024-01-02, Samsung's 50:1 split day); panel build tested offline; study in `studies/korea_survivorship` |
+| US stocks | `adapters.yfinance`, or your own point-in-time data through `adapters.long_format` | **Not with yfinance**: it returned a correct history for 0 of 42 well-known delisted or acquired stocks (`docs/survivorship.md`). Yes if you bring CRSP, Sharadar or Norgate data | Detector, coverage report and delisting scenarios; no free fix exists |
+
 ## Three entry points
 
 | Function | Question it answers |
@@ -96,6 +107,33 @@ validated**, and the README there explains what the biases changed and what went
 Still not modelled: market impact beyond the thin-contract penalty (no order book in the archive), the settlement price of a
 delisted contract after its last bar, borrow limits and margin, and anything outside Binance.
 
+## Equities: Korea and the US
+
+**Korea.** `quantbt.adapters.krx` builds a point-in-time panel from the cached daily files of the official KRX OpenAPI
+(`fetch_days`, resumable, about two calls per trading day). Eligibility on day t uses only data up to t; securities that stop
+trading are kept for the days they traded and flagged in `delist_after`. A code that vanishes for 120+ days and returns is
+treated as a different security. Prices are adjusted by compounding the reference-price returns (price return only,
+no dividends). You need a KRX OpenAPI key (`KRX_OPENAPI_KEY`).
+
+```python
+from quantbt.adapters.krx import fetch_days, build_krx_panel, load_key
+fetch_days("2013-01-01", "2026-10-06", "~/.cache/quantbt/krx", key=load_key(".env"))
+panel = build_krx_panel("~/.cache/quantbt/krx", start="2013-01-01")
+```
+
+**US.** Free data cannot remove the bias, so the package detects it, measures it, and shows what it could be worth:
+
+| tool | what it does |
+|---|---|
+| `Panel.audit()` | `survivorship_suspected` is true when a panel of 30+ names over 3+ years has almost nothing that stops trading. The yfinance adapter warns |
+| `equity.universe_coverage` | how many US stocks were listed each year and how many of the ones that stopped trading are in your panel (uses a free Tiingo ticker list; lower bound, it is thin before 2013) |
+| `equity.survivorship_scenarios` | puts delistings back at random (uniform, or tilted to volatile or illiquid names) with an explicit delisting return, and reports the spread of your result. A what-if, not a correction |
+| `equity.survivors_only` | the usual shortcut made explicit, so a result can be compared with and without it |
+| `adapters.long_format.panel_from_long` | a strict door for point-in-time data from CRSP, Sharadar, Norgate and the like: permanent ids, duplicate checks, delisting returns compounded into the last close, ticker-reuse detection |
+
+A ticker is not an identifier: in the probe, five tickers returned the history of a *different* company that later reused the
+symbol, with no error. See `docs/survivorship.md`.
+
 ## Tests: known answers, not real data
 
 Every test uses data where the right answer is known, so none of them needs a network or real prices.
@@ -105,6 +143,8 @@ python tests/test_synthetic.py      # core engine: look-ahead, neutralisation, b
 python tests/test_annualization.py  # 252 versus 365 days
 python tests/test_validation.py     # deflated Sharpe, PBO, permutation test: noise must fail, a real edge must pass
 python tests/test_crypto.py         # survivorship, point-in-time eligibility, stale bars, delisting, funding sign, costs
+python tests/test_krx.py            # Korea: delisted names kept, split-day return, listing day, code reuse, resumable fetch
+python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 ```
 
 | Test | Expectation |
@@ -119,11 +159,13 @@ python tests/test_crypto.py         # survivorship, point-in-time eligibility, s
 | T8 to T10 | small universes, small Fama-MacBeth regressions, perfectly collinear controls |
 | T11 | annualisation scales by exactly sqrt(365/252) |
 | V1 to V3 | deflated Sharpe, PBO and permutation p-value: noise looks like noise, a real edge is caught |
-| C1 to C7 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |
+| K1 to K5 | Korean adapter: a stock gone by the end is in the panel and flagged, a 50:1 split leaves the return unchanged, the listing-day move is dropped, a returning code becomes a new security, fetching resumes and stops cleanly on a quota error |
+| E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
+| C1 to C8 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |
 
 ## Limits
 
-- No bundled data. The yfinance adapter is not point-in-time; the Binance archive path is.
+- No bundled data. The yfinance adapter is not point-in-time; the Binance archive and KRX paths are. US stocks need data you bring.
 - Fundamentals (`chars`) must be supplied by the user for the controls to be complete; without them it warns.
 - Docstrings and some code comments are in Korean. This README is the English documentation.
 - For research and education. Nothing here is investment advice.
