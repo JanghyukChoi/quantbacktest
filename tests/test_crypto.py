@@ -148,6 +148,30 @@ def test_cost_model_is_not_fooled_by_volatility():
     print(f"C7 cost model  fixed, bounded by fee + half spread + thin penalty (max {ok.max():.1f} bp) however volatile the contract  PASS")
 
 
+def test_survivorship_detector():
+    """audit() must say 'suspected' for a panel in which nothing ever dies, and not for one that includes delisted names."""
+    with tempfile.TemporaryDirectory() as d:
+        store, live = _fake_store(Path(d))
+        full = build_panel(store, start="2021-03-01", live=live)
+        surv = build_panel(store, start="2021-03-01", survivors_only=True, live=live)
+    # the fake archive has only 4 dying names, so build a larger synthetic pair for the 30-name rule
+    rng = np.random.default_rng(3)
+    dates = pd.date_range("2018-01-01", periods=1500, freq="D")
+    tick = [f"S{i:02d}" for i in range(60)]
+    close = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, 0.02, (1500, 60)), axis=0)), index=dates, columns=tick)
+    vol = pd.DataFrame(rng.lognormal(12, 0.3, (1500, 60)), index=dates, columns=tick)
+    el = pd.DataFrame(True, index=dates, columns=tick)
+    survivors = q.Panel(close=close, eligible=el, volume=vol, market="TEST")
+    dying = close.copy()
+    for k, c in enumerate(tick[:12]):                                 # 20% of the names stop trading at some point
+        dying.loc[dates[400 + 60 * k]:, c] = np.nan
+    mixed = q.Panel(close=dying, eligible=el & dying.notna(), volume=vol, market="TEST")
+    a_s, a_m = survivors.audit(), mixed.audit()
+    assert a_s["survivorship_suspected"] is True and a_s["ended_before_end_share"] == 0.0
+    assert a_m["survivorship_suspected"] is False and abs(a_m["ended_before_end_share"] - 0.2) < 1e-9
+    print("C8 survivorship detector  survivors-only panel flagged, panel with 20% delistings not flagged  PASS")
+
+
 if __name__ == "__main__":
     import warnings; warnings.filterwarnings("ignore")
     test_survivorship_and_stale_tail_and_min_age()
@@ -155,5 +179,6 @@ if __name__ == "__main__":
     test_funding_sign_and_size()
     test_delisting_event_is_explicit()
     test_cost_model_is_not_fooled_by_volatility()
+    test_survivorship_detector()
     print("crypto tests: all passed")
 

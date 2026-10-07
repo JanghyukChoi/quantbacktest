@@ -102,6 +102,12 @@ def load_panel(tickers: list[str], start: str, end: str, *,
         stacklevel=2)
 
     ppy = 365 if market.upper() == "CRYPTO" else 252   # 24/7 시장은 연 365 거래일
+    n_ended = sum(1 for c in close.columns if close[c].last_valid_index() is not None
+                  and close[c].last_valid_index() < close.index[-1] - pd.Timedelta(days=30))
+    if len(close.columns) >= 30 and n_ended == 0:
+        warnings.warn("이 패널에는 기간 안에 가격이 끊긴 종목이 하나도 없습니다 — 오늘 살아 있는 종목만 모은 것이라 "
+                      "생존편향이 있습니다(yfinance 는 상장폐지, 인수 종목의 과거 가격을 거의 주지 않는다). "
+                      "docs/survivorship.md 참고.", stacklevel=2)
     return Panel(close=close, eligible=eligible, open=open_, high=high, low=low,
                  volume=volume, mkt_cap=mkt_cap, chars=chars,
                  market=market, entry_lag=entry_lag, periods_per_year=ppy)

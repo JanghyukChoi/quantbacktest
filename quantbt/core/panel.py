@@ -179,6 +179,15 @@ class Panel:
             tail = cov.iloc[-20:].mean(); body = cov.iloc[:-20].median()
             out["tail_coverage_ratio"] = float(tail / body) if body else np.nan
             out["truncation_suspected"] = bool(tail < body * 0.5)
+
+        # 생존편향 의심: 실제 시장에서는 해마다 일정 비율의 종목이 사라진다. 패널 끝 이전에 가격이 끊긴 종목이
+        # 거의 없다면 그 패널은 '오늘 살아 있는 종목'만 모은 것이다. 측정: yfinance 로 상장폐지·인수된 유명 종목
+        # 42개를 조회했더니 정확한 이력을 돌려준 것이 0개였다(docs/survivorship.md).
+        last = self.close.apply(lambda c: c.last_valid_index())
+        ended = last.dropna() < (self.dates[-1] - pd.Timedelta(days=30))
+        span_years = (self.dates[-1] - self.dates[0]).days / 365.25
+        out["ended_before_end_share"] = float(ended.mean()) if len(ended) else np.nan
+        out["survivorship_suspected"] = bool(len(ended) >= 30 and span_years >= 3 and ended.mean() < 0.01)
         return out
 
 

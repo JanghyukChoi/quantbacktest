@@ -1,0 +1,40 @@
+# Survivorship bias with free data: what was measured
+
+**Measured on 2026-10-07 with yfinance 1.7.0** (`docs/survivorship_probe.py` reruns it; Yahoo's data changes, so
+yours may differ).
+
+I looked up 42 well-known US stocks that were delisted, acquired, went bankrupt or changed ticker between 2008 and
+2023 (Lehman, Bear Stearns, Silicon Valley Bank, Twitter, Time Warner, Celgene and so on). This is a convenience
+sample chosen from memory, not a statistical sample, so no rate should be read from it.
+
+| yfinance returned | count |
+|---|---|
+| no data at all | 37 |
+| the price history of a **different company** that later reused the ticker (WM, GM, WB, SBNY, SHLD) | 5 |
+| the correct history up to the delisting | **0** |
+
+Two separate problems, and the second is the worse one:
+1. **Missing names.** A universe built from yfinance contains only stocks that exist today. Every bankruptcy and
+   every takeover target is gone, so returns are biased upward and drawdowns are understated.
+2. **Wrong names.** A ticker is not a stable identifier. If a backtest stores `WM` for 2007 and gets Waste Management's
+   prices from yfinance, it has silently replaced Washington Mutual, which went bankrupt, with a company that did not.
+   There is no error and no NaN.
+
+## What `quantbt` does about it
+
+- `Panel.audit()` reports `ended_before_end_share` and `survivorship_suspected`. In a real market a few percent of
+  names disappear each year; a panel of 30+ names over 3+ years where almost none end early is a survivors-only panel.
+  The yfinance adapter raises a warning when that happens.
+- The crypto path (`quantbt.crypto`) does not have the problem: the Binance archive keeps delisted contracts, and 42%
+  of the USDT perpetuals ever listed are delisted or halted. `survivors_only=True` reproduces the shortcut so the
+  bias can be measured (`studies/crypto_cross_section`).
+- `backtest_portfolio(..., delist_return=...)` takes an explicit return for a name that leaves the sample. For US equities
+  the literature gives sensible sensitivity values: about -30% for performance-related NYSE/AMEX delistings
+  (Shumway 1997) and about -55% for Nasdaq (Shumway and Warther 1999).
+
+## What a real fix needs
+
+A point-in-time dataset keyed by a **permanent identifier** (not the ticker), with delisted securities, delisting
+returns and dated index membership. The usual sources are CRSP (through WRDS), Sharadar, Norgate and Polygon; none is
+free. The framework's contract (`Panel`: a date x security matrix plus a point-in-time `eligible` mask) is meant to
+take such data as input; what it cannot do is create it.
