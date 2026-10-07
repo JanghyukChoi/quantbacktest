@@ -1,5 +1,7 @@
 # quantbacktest
 
+[![CI](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml/badge.svg)](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml)
+
 The Python package is named `quantbt` (`import quantbt`); the repository is `quantbacktest`.
 
 A small backtest harness for factor screening, event signals and portfolio alphas. Core dependencies are
@@ -80,11 +82,16 @@ q.capacity_curve(panel, weights, aums=[1e6, 5e6, 25e6, 100e6], y_values=(0.5, 1.
 
 ## Install
 
+Not on PyPI yet. From a clone:
+
 ```bash
-pip install pandas numpy
-pip install yfinance          # only for the public-data adapter
-pip install -e .              # from this directory
+pip install -e .                  # pandas and numpy are the only requirements
+pip install -e ".[yfinance]"      # the public-data adapter
+pip install -e ".[test]"          # pytest, plus statsmodels and scipy for the cross-check tests
 ```
+
+Python 3.10 to 3.14, pandas 2.0 to 3.0. CI runs every test file on each of them, including the oldest pandas and numpy the
+package declares. Only Linux is tested.
 
 ## Example (public data)
 
@@ -185,6 +192,8 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_packaging.py       # version, Python floor, CI matrix and classifiers agree
+python tests/smoke_installed.py     # run from outside the repo against an installed wheel (what the CI package job does)
 python tests/test_weights.py        # weights: equals the engine, plain-loop reference with all costs, known answers, guard rails, capacity curve
 python tests/test_tiingo.py         # Tiingo adapter offline: delisting kept, windows cut, resumable, quota stop, point in time, loud failures
 python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmodels and scipy when installed, known answers, error rates
@@ -206,6 +215,8 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| P1, P2 | the version is the same in pyproject, `__version__` and the changelog; the declared Python floor, the classifiers and the CI matrix agree, and the matrix tests the oldest declared pandas and numpy |
+| R8 | `neutralize` equals a least-squares solution; a factor inside the controls' span gives NaN even with rounding noise (found because the old behaviour made one test fail on Python 3.10 only) |
 | W1 to W6 | `backtest_weights` equals the engine on the engine's own holdings (exactly, except for a netting saving it documents), equals a plain-loop implementation with spread, borrow and impact, impact matches a hand calculation and scales as sqrt(AUM) and linearly in Y, borrow follows its formula, the untradable cap is exact, guard rails, capacity curve shape. Ten planted bugs are all caught |
 | U1 to U8 | Tiingo adapter against a fake API: a delisted security is kept and flagged, a split does not move the return, a sub-dollar stock is never eligible, a reused ticker becomes two securities, a quota stops cleanly and resumes, eligibility ignores the future, the sample draw is seeded, malformed answers leave no file. Nine planted bugs are all caught |
 | A1 to A8, B1 to B3 | alpha and beta equal statsmodels' Newey-West regression to 1e-12 and IC equals scipy's Spearman (when installed), known answers and invariances, rejection rates on noise, forward returns equal a loop implementation with and without delisting returns, bootstrap coverage and standard errors against theory, a paired difference of identical series is exactly zero. Planting eight bugs in the module (wrong taper, shifted window, ignored delisting, unpaired resampling and others) is caught by these tests every time |

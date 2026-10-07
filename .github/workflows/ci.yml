@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The declared lower bounds, so "pandas>=2.0, numpy>=1.24" is checked and not just written down.
+          - {label: "py3.10, oldest pandas and numpy", python: "3.10", deps: "pandas==2.0.3 numpy==1.24.4"}
+          # With the reference packages the cross-check tests need (statsmodels, scipy); they skip without them.
+          - {label: "py3.10", python: "3.10", deps: "pandas numpy statsmodels scipy"}
+          - {label: "py3.11", python: "3.11", deps: "pandas numpy statsmodels scipy"}
+          - {label: "py3.12", python: "3.12", deps: "pandas numpy statsmodels scipy"}
+          - {label: "py3.13", python: "3.13", deps: "pandas numpy statsmodels scipy"}
+          - {label: "py3.14", python: "3.14", deps: "pandas numpy statsmodels scipy"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ${{ matrix.deps }}
+          python -m pip install --no-deps -e .
+          python -c "import pandas, numpy; print('pandas', pandas.__version__, 'numpy', numpy.__version__)"
+      - name: Run every test script (each exits non-zero on failure)
+        run: |
+          set -e
+          for t in tests/test_*.py; do
+            echo "=== $t"
+            python -W ignore "$t"
+          done
+
+  lint:
+    name: names and syntax (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install ruff
+      # Only errors that crash at run time (syntax, undefined names, redefinitions), not style.
+      - run: ruff check --select E9,F63,F7,F82,F811,F821,F822,F823 quantbt tests studies docs examples
+
+  package:
+    name: build and install the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: The wheel holds the library and nothing else
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          bad = [n for n in names if n.startswith(("tests/", "studies/", "docs/", "examples/", "build/"))]
+          assert not bad, bad
+          for need in ("quantbt/__init__.py", "quantbt/portfolio.py", "quantbt/weights.py", "quantbt/adapters/krx.py",
+                       "quantbt/adapters/tiingo.py", "quantbt/crypto/panel.py", "quantbt/equity/scenarios.py", "quantbt/core/controls.py"):
+              assert need in names, need
+          print(len(names), "files in the wheel")
+          PY
+      - name: Install the wheel into a clean environment and run a smoke test from outside the repo
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          cd /tmp && /tmp/clean/bin/python "$GITHUB_WORKSPACE/tests/smoke_installed.py"

@@ -188,6 +188,36 @@ def test_permutation_p_values_are_not_anti_conservative():
     print(f"R7 permutation test rejects {rate:.2f} of noise datasets at p<=0.05 (expect ~0.05, bound 0.15)  PASS")
 
 
+def test_neutralize_matches_lstsq_and_drops_numerically_empty_days():
+    """Residuals equal an independent least-squares solution; a factor inside the span of the controls leaves rounding
+    noise only, and that must come out as NaN (not as something a rank-normalisation could blow up)."""
+    from quantbt.core.controls import neutralize
+    rng = np.random.default_rng(21)
+    T, N = 40, 120
+    idx = pd.bdate_range("2020-01-01", periods=T); cols = [f"S{i:03d}" for i in range(N)]
+    mk = lambda a: pd.DataFrame(a, index=idx, columns=cols)
+    c1, c2, c3 = (mk(rng.normal(size=(T, N)).astype(np.float32)) for _ in range(3))
+    ctrl = {"a": c1, "b": c2, "c": c3}
+    el = pd.DataFrame(rng.random((T, N)) > 0.1, index=idx, columns=cols)
+    f = mk(0.5 * c1.to_numpy() - 0.3 * c2.to_numpy() + rng.normal(size=(T, N)))
+    got = neutralize(f, ctrl, el).to_numpy()
+    worst = 0.0
+    for i in range(T):
+        ok = el.iloc[i].to_numpy()
+        X = np.column_stack([np.ones(ok.sum())] + [c.iloc[i].to_numpy(float)[ok] for c in ctrl.values()])
+        y = f.iloc[i].to_numpy(float)[ok]
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        worst = max(worst, float(np.max(np.abs(got[i][ok] - (y - X @ beta)))))
+        assert np.isnan(got[i][~ok]).all()
+    assert worst < 1e-9, worst
+    inside = mk(2.0 * c1.to_numpy() + 0.7 * c3.to_numpy() + 1.0)                          # exactly in the span (with the intercept)
+    noisy = inside + mk(rng.normal(0, 1e-7, (T, N)))                                     # float32-sized rounding noise on top
+    for name, g in (("exact", inside), ("with rounding noise", noisy)):
+        r = neutralize(g, ctrl, el).to_numpy()
+        assert np.isnan(r).all(), f"{name}: {int(np.isfinite(r).sum())} finite residuals of pure noise"
+    print(f"R8 neutralize equals least squares (max |diff| {worst:.0e}); a factor inside the controls' span gives NaN, noise or not  PASS")
+
+
 if __name__ == "__main__":
     test_long_short_matches_loops()
     test_long_only_matches_loops()
@@ -196,4 +226,5 @@ if __name__ == "__main__":
     test_cost_units_scalar_is_round_trip_panel_is_one_way()
     test_dsr_is_not_anti_conservative_on_noise()
     test_permutation_p_values_are_not_anti_conservative()
+    test_neutralize_matches_lstsq_and_drops_numerically_empty_days()
     print("reconcile tests: all passed")

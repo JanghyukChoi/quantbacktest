@@ -1,19 +1,40 @@
 [project]
 name = "quantbt"
-version = "0.1.0"
+version = "0.2.0"
 description = "Backtest harness for factor screening, event signals and portfolio alphas, built to make common backtest errors hard"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["backtest", "quant", "survivorship-bias", "overfitting", "point-in-time", "deflated-sharpe", "factor"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Financial and Insurance Industry",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Office/Business :: Financial :: Investment",
+  "Topic :: Scientific/Engineering",
+]
 authors = [{ name = "Janghyuk Choi" }]
 requires-python = ">=3.10"
 dependencies = ["pandas>=2.0", "numpy>=1.24"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
 yfinance = ["yfinance"]
+# The cross-check tests compare against statsmodels and scipy when they are installed; they are not needed to use the library.
+test = ["pytest>=7.0", "statsmodels", "scipy"]
+dev = ["pytest>=7.0", "statsmodels", "scipy", "ruff", "build", "twine"]
+
+[project.urls]
+Repository = "https://github.com/JanghyukChoi/quantbacktest"
+Issues = "https://github.com/JanghyukChoi/quantbacktest/issues"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

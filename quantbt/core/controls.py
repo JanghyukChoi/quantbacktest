@@ -73,6 +73,7 @@ def neutralize(factor: pd.DataFrame, controls: dict[str, pd.DataFrame],
     """날짜별 횡단면 회귀 잔차 — 통제변수와 직교화.
 
     연속 팩터용. 이벤트(0/1) 신호는 event.py 의 더미 회귀를 쓴다.
+    잔차가 팩터 크기의 1e-5 미만이면(통제변수가 팩터를 거의 완전히 설명) 그날은 NaN 이다.
     """
     fv = factor.values.astype(np.float64)
     ev = eligible.values
@@ -90,7 +91,13 @@ def neutralize(factor: pd.DataFrame, controls: dict[str, pd.DataFrame],
             Q, _ = np.linalg.qr(X)
         except np.linalg.LinAlgError:
             continue
-        out[i][ok] = y - Q @ (Q.T @ y)
+        res = y - Q @ (Q.T @ y)
+        # A factor inside the span of the controls leaves only rounding noise (about 1e-8 of its size in float32).
+        # Left in, a later rank-normalisation would blow that noise up to unit scale and the result would depend on the
+        # BLAS build. No information is left, so the day stays NaN.
+        if not (res.std() > 1e-5 * y.std()):
+            continue
+        out[i][ok] = res
     return pd.DataFrame(out, index=factor.index, columns=factor.columns)
 
 

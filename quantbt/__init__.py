@@ -21,6 +21,6 @@ from . import validation, analytics
 from .ledger import Ledger
 from .weights import backtest_weights, capacity_curve, ImpactModel
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["validation", "analytics", "Ledger", "backtest_weights", "capacity_curve", "ImpactModel", "Panel", "build_pit_eligible", "GateConfig", "screen",
            "backtest_event", "backtest_portfolio", "assert_timing"]
