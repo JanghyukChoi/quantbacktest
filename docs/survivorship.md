@@ -20,6 +20,31 @@ Two separate problems, and the second is the worse one:
    prices from yfinance, it has silently replaced Washington Mutual, which went bankrupt, with a company that did not.
    There is no error and no NaN.
 
+## What a free Tiingo key changes (measured 2026-10-07)
+
+`docs/tiingo_probe.py` repeats the 41-stock probe against Tiingo's end-of-day API (free account, key in
+`TIINGO_API_KEY`). Same caveat: a convenience sample from memory, so read the pattern, not a rate.
+
+| Tiingo returned | count |
+|---|---|
+| the stock's own history up to its delisting | 23 |
+| no data | 7 |
+| data that runs past the delisting date (a later company reusing the ticker, or a rename) | 11 |
+
+The split by **reason for leaving** matters more than the total. I sorted the 41 by hand into 12 distress cases (bankruptcy
+or rescue sale: LEH, WB, BSC, CFC, WM, GM, CIT, SIVB, FRC, SBNY, SHLD, JCP) and 29 others (takeovers, renames). In the first
+group **none** of the 12 came back with the failed company's own history: seven had no data or a later company's data
+under the same ticker, and for GM and CIT the list only starts after the restructuring. In the second group 23 of 29 came back correct
+(the rest: two ticker reuses, a rename with no data, a rename that continues under the new ticker, one with no data).
+
+So Tiingo removes most of the takeover half of survivorship bias for free, and **not the bankruptcy half**, which is the
+half with the large negative delisting returns. A universe built from it is less biased, not unbiased, and a
+survivors-versus-Tiingo comparison would understate the bias. Ticker reuse is also present (WM returns Waste Management
+from 1991; MON returns two different companies with a gap), so key securities by ticker *and* listing dates and split
+at long gaps, as the KRX adapter does.
+
+I did not check how many requests the free tier allows in total; the probe stops at the first HTTP 429.
+
 ## What `quantbt` does about it
 
 - `Panel.audit()` reports `ended_before_end_share` and `survivorship_suspected`. In a real market a few percent of
