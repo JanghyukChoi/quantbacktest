@@ -14,6 +14,7 @@ pass or fail gates. `PREREGISTRATION.md` was committed before any factor result 
 | `run_study.py` | the analysis, written from the preregistration (about 3.5 minutes on cached data) |
 | `results.json` | raw output |
 | `make_report.py`, `REPORT.md` | the tables, generated from `results.json` so no number is typed by hand |
+| `AMENDMENT_1.md`, `run_amendment1.py`, `results_amendment1.json`, `make_report_amendment1.py`, `REPORT_AMENDMENT1.md` | post-hoc intervals and exposure check, written before they were run |
 
 ## What the numbers say
 
@@ -35,6 +36,27 @@ Difference in net Sharpe, B minus A, at 15 bp one-way cost (positive means the s
 - The share of eligible security-days that belong to stocks missing from B is 13% in 2013 and falls to under 1% by 2025.
   B is a poor picture of the early years and a good one of recent years, as expected.
 
+## Amendment 1: how precise is it, and is it exposure? (post hoc)
+
+Written and committed before it was run (`AMENDMENT_1.md`), then run with `run_amendment1.py`; tables in
+`REPORT_AMENDMENT1.md`. The 8 original trials were recomputed in the same run and match `results.json` exactly.
+
+- **Precision.** With a paired bootstrap, 12 of the 16 comparisons (8 trials x 2 costs) have a 95% interval for B - A that
+  excludes zero. The 16 are not independent (two holding periods and two cost levels of the same four factors), so read it
+  as four factors, not sixteen findings.
+- **Low volatility is the robust result.** B understates it by 0.21 to 0.23 Sharpe (interval about -0.30 to -0.13) and the
+  gap does not shrink when the factor is neutralised against reversal, momentum and size (-0.25 to -0.28).
+- **The small-size overstatement is mostly exposure.** The raw +0.19 to +0.20 falls to +0.01 to +0.03 (intervals include
+  zero) once the factor is neutralised against the other three styles. A neutralised factor is a different object, so this
+  says the difference travels with those exposures, not that the size factor itself is unbiased.
+- **Momentum gets larger, not smaller.** Raw -0.07 to -0.08 (intervals touch zero) becomes -0.15 to -0.17 with intervals
+  clear of zero. This is the least certain of the four: it appears only after neutralising, in an exploratory analysis.
+- **Reversal** is small and borderline (+0.08 raw, +0.04 neutralised, intervals mostly include zero at 15 bp).
+- **It is not market beta.** Regressing each portfolio on the market, beta is almost the same for A and B (differences of
+  about 0.02). The alpha gap matches the Sharpe gap (for 5-day low volatility: +18.9% a year on A, +14.7% on B).
+- The reading rule fixed in advance gives 9 comparisons not explained by the other exposures and 7 largely exposure; it is
+  a convention for reading, and one case (5-day reversal at 15 bp) sits exactly on its boundary.
+
 ## Why the sign differs (a hypothesis, not tested here)
 
 Not tested; this is my reading and the study does not isolate it. Delisted Korean stocks are disproportionately small,
@@ -45,8 +67,9 @@ look less bad. A test would split the A portfolio into legs and remove delisted 
 
 ## Limits
 
-- One market, one period, one run. There is no significance test and no confidence interval on the differences; the
-  reader should not treat 0.2 Sharpe as a precise number.
+- One market, one period, one run, no out-of-sample data. The original report has no interval on the differences;
+  Amendment 1 adds paired bootstrap intervals after the fact (about 93% coverage at a nominal 95% in this library's own
+  test), so do not treat 0.2 Sharpe as a precise number.
 - Price return only, no dividends. Costs are a flat assumption (15 bp and 0 bp are both reported).
 - Shorting is not generally available in Korea. The long-short form isolates the factor; it is not a tradable strategy,
   and **nothing here validates a factor**. Two of the four lose money at 15 bp on both universes.

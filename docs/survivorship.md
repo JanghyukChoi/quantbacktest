@@ -32,7 +32,9 @@ Two separate problems, and the second is the worse one:
   2013-2026 data (`studies/korea_survivorship`), running four factors on survivors only instead changes the net
   Sharpe by -0.23 to +0.20 depending on the factor (low volatility is understated, small size overstated), and by
   about zero on average. 13% of eligible security-days in 2013 belong to stocks no longer listed. The sign differs by
-  factor, so "survivorship inflates returns" is not a safe assumption to correct for.
+  factor, so "survivorship inflates returns" is not a safe assumption to correct for. The low-volatility
+  understatement is the robust part (paired bootstrap interval clear of zero, and it survives neutralising against the
+  other styles); the small-size overstatement mostly disappears once the other styles are neutralised.
 - `backtest_portfolio(..., delist_return=...)` takes an explicit return for a name that leaves the sample. For US equities
   the literature gives sensible sensitivity values: about -30% for performance-related NYSE/AMEX delistings
   (Shumway 1997) and about -55% for Nasdaq (Shumway and Warther 1999).
