@@ -61,29 +61,51 @@ biased upward. The adapter says so when it loads.
 `examples/quickstart.py` runs all three entry points on synthetic data. It uses random factors on purpose; they
 should fail every gate, and they do.
 
-## Crypto and other 24/7 markets
+## Crypto
 
-Set `market="CRYPTO"` in the yfinance adapter (or `periods_per_year=365` on a `Panel` you build yourself). The
-annualisation uses 365 days instead of 252; with 252 the CAGR, Sharpe and volatility of a 24/7 market come out wrong
-(on a 4.6-year crypto sample, 252 reported 6.6 years of data). `tests/test_annualization.py` checks the scaling.
+Two layers. `market="CRYPTO"` in the yfinance adapter (or `periods_per_year=365` on a `Panel`) fixes the annualisation:
+with 252 days the CAGR, Sharpe and volatility of a 24/7 market come out wrong (on a 4.6-year sample, 252 reported 6.6
+years of data). On top of that, `quantbt.crypto` builds a panel for Binance USDT-margined perpetuals from the public
+archive and removes or measures the biases that usually flatter a crypto backtest:
+
+| bias | what is done |
+|---|---|
+| Survivorship | the universe is every contract that ever traded (900, of which 376 are delisted or halted), not today's survivors. `survivors_only=True` reproduces the shortcut so its effect can be measured |
+| Universe look-ahead | eligibility on day t uses only data up to t: minimum age, trailing median turnover, a valid and non-zero-volume bar |
+| Stale prices | zero-volume bars (frozen prices after a halt) are dropped |
+| Funding | the daily funding rate is charged by `backtest_portfolio` (long pays a positive rate, short receives) |
+| Delisting | the last real bar is marked; `delist_return` sets the explicit return on the next day, and the events held are counted |
+| Costs | taker fee plus a fixed half spread plus a thin-contract penalty, and a participation report instead of an invented impact model |
 
 ```python
-panel = load_panel(["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"], "2020-06-01", "2024-12-31", market="CRYPTO")
+import quantbt as q
+from quantbt.crypto import fetch_all, build_panel, liquidity_cost_bp, participation_report
+
+fetch_all()                                                     # once: ~900 contracts into ~/.cache/quantbt
+panel = build_panel(start="2020-08-01", min_adv_usd=2e7, min_age_days=90)
+cost = liquidity_cost_bp(panel)                                 # one-way bp, date x ticker
+res = q.backtest_portfolio(panel, factor, long_q=0.2, short_q=0.2, hold=5, spread_bp=cost, delist_return=-0.3)
+print(res.metrics["funding_annual_bp"], res.metrics["delist_events_held"])
+print(participation_report(panel, res.holdings, aum_usd=10e6))
 ```
 
-What is **not** modelled for crypto, so treat the numbers as optimistic:
+`quantbt.validation` has the deflated Sharpe, PBO (CSCV) and a permutation test for the selection you ran.
+`studies/crypto_cross_section/` is a worked, preregistered example: four factors, 12 trials, five gates. It is **not
+validated**, and the README there explains what the biases changed and what went wrong along the way.
 
-- No perpetual-futures funding or borrow cost for the short leg; shorting is assumed free apart from the spread.
-- The yfinance universe is today's survivors (delisted coins are missing), and crypto survivorship bias is larger
-  than in equities.
-- The daily bar is a UTC midnight close; there is no market open or close, so the entry-lag convention is a modelling
-  choice, not an exchange fact.
-- Spread and cost estimators were written for equities; check them on thin tokens before relying on them.
+Still not modelled: market impact beyond the thin-contract penalty (no order book in the archive), the settlement price of a
+delisted contract after its last bar, borrow limits and margin, and anything outside Binance.
 
 ## Tests: known answers, not real data
 
-`python tests/test_synthetic.py` checks that the harness answers correctly on data where the answer is known.
-All ten pass, plus `python tests/test_annualization.py` for the 252 versus 365 scaling.
+Every test uses data where the right answer is known, so none of them needs a network or real prices.
+
+```bash
+python tests/test_synthetic.py      # core engine: look-ahead, neutralisation, base rates (10 tests)
+python tests/test_annualization.py  # 252 versus 365 days
+python tests/test_validation.py     # deflated Sharpe, PBO, permutation test: noise must fail, a real edge must pass
+python tests/test_crypto.py         # survivorship, point-in-time eligibility, stale bars, delisting, funding sign, costs
+```
 
 | Test | Expectation |
 |---|---|
@@ -95,10 +117,13 @@ All ten pass, plus `python tests/test_annualization.py` for the 252 versus 365 s
 | T6 neutralisation | a control used as the factor disappears after neutralising |
 | T7 base rate | random firing gives a lift near zero |
 | T8 to T10 | small universes, small Fama-MacBeth regressions, perfectly collinear controls |
+| T11 | annualisation scales by exactly sqrt(365/252) |
+| V1 to V3 | deflated Sharpe, PBO and permutation p-value: noise looks like noise, a real edge is caught |
+| C1 to C7 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |
 
 ## Limits
 
-- No bundled data. The only adapter uses yfinance, which is not point-in-time.
+- No bundled data. The yfinance adapter is not point-in-time; the Binance archive path is.
 - Fundamentals (`chars`) must be supplied by the user for the controls to be complete; without them it warns.
 - Docstrings and some code comments are in Korean. This README is the English documentation.
 - For research and education. Nothing here is investment advice.
