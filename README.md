@@ -165,6 +165,7 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_tiingo.py         # Tiingo adapter offline: delisting kept, windows cut, resumable, quota stop, point in time, loud failures
 python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmodels and scipy when installed, known answers, error rates
 ```
 
@@ -184,6 +185,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| U1 to U8 | Tiingo adapter against a fake API: a delisted security is kept and flagged, a split does not move the return, a sub-dollar stock is never eligible, a reused ticker becomes two securities, a quota stops cleanly and resumes, eligibility ignores the future, the sample draw is seeded, malformed answers leave no file. Nine planted bugs are all caught |
 | A1 to A8, B1 to B3 | alpha and beta equal statsmodels' Newey-West regression to 1e-12 and IC equals scipy's Spearman (when installed), known answers and invariances, rejection rates on noise, forward returns equal a loop implementation with and without delisting returns, bootstrap coverage and standard errors against theory, a paired difference of identical series is exactly zero. Planting eight bugs in the module (wrong taper, shifted window, ignored delisting, unpaired resampling and others) is caught by these tests every time |
 | C1 to C8 | delisted contracts included, eligibility unchanged by future data, frozen bars dropped, new listings wait `min_age_days`, funding sign and size, explicit delisting return, bounded costs |
 
