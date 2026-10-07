@@ -1,8 +1,8 @@
-"""게이트 러너 — 결과를 보기 전에 고정하는 판정 관문.
+"""Gate runner: verdict gates fixed before the result is seen.
 
-게이트 순서에 의미가 있다. 통계 → 비용 → 안정성 → 구조 순으로,
-**뒤로 갈수록 통과가 어렵다**. 통계 게이트만 두면 후보가 많이 살아남지만
-비용·안정성·구조 게이트를 거치면 크게 줄어드는 것이 정상이다.
+The order of the gates matters: statistics -> cost -> stability -> structure.
+**Each later gate is harder to pass.** With the statistical gate alone many candidates survive, but
+after the cost, stability and structure gates far fewer remain, and that is the normal outcome.
 """
 
 from __future__ import annotations
@@ -17,23 +17,23 @@ from .estimators import newey_west_t
 
 @dataclass
 class GateConfig:
-    """게이트 문턱. 검정 시작 전에 고정하고 이후 바꾸지 않는다."""
-    null_threshold: float | None = None   # None 이면 셔플 귀무로 실측
-    fallback_t: float = 3.0               # 귀무 실측이 불가할 때만
-    require_net_positive: bool = True     # 비용 후 순수익 > 0
-    require_subperiod_sign: bool = True   # 전·후반 부호 일치
+    """Gate thresholds. Fix them before testing starts and do not change them afterwards."""
+    null_threshold: float | None = None   # None means measure it with a shuffled null
+    fallback_t: float = 3.0               # only when the null cannot be measured
+    require_net_positive: bool = True     # net profit after costs > 0
+    require_subperiod_sign: bool = True   # the sign agrees in the first and second half
     min_monotonicity: float = 0.5         # |rho|
-    min_yearly_positive: float = 0.6      # 양수 연도 비율
-    max_single_name_share: float = 0.5    # 최다 종목 발화 비율 (정적 바스켓)
-    min_turnover: float = 0.05            # 일간 회전율 하한
+    min_yearly_positive: float = 0.6      # share of years that are positive
+    max_single_name_share: float = 0.5    # firing share of the most frequent name (static basket)
+    min_turnover: float = 0.05            # lower bound of daily turnover
 
 
 def fire_structure(fire: np.ndarray, dates: pd.DatetimeIndex,
                    tickers: pd.Index) -> dict:
-    """발화 구조 — 시그널인가 정적 바스켓인가.
+    """Firing structure: a signal or a static basket?
 
-    여러 해 동안 같은 대형주만 계속 뽑는 팩터는 시그널이 아니라 사이즈 팩터(정적 바스켓)다.
-    최다 종목 비율과 최대 연속 발화일로 이를 잡는다.
+    A factor that keeps picking the same large stocks for years is a size factor (a static basket), not a signal.
+    The top-name share and the longest run of consecutive firing days catch it.
     """
     n = fire.sum(axis=1)
     act = n[n > 0]
@@ -44,7 +44,7 @@ def fire_structure(fire: np.ndarray, dates: pd.DatetimeIndex,
         return {"fires_per_day": 0.0, "active_days_pct": 0.0, "n_names": 0,
                 "top10_share": np.nan, "max_name_share": np.nan,
                 "max_consecutive": 0, "daily_turnover": np.nan, "top_names": {},
-                "note": "발화 0건"}
+                "note": "no firings"}
     turn = []
     for i in range(1, fire.shape[0]):
         a, b = fire[i - 1], fire[i]
@@ -72,7 +72,7 @@ def fire_structure(fire: np.ndarray, dates: pd.DatetimeIndex,
 
 
 def subperiod(values: np.ndarray, dates: pd.DatetimeIndex, lag: int = 21) -> dict:
-    """전·후반 분할. 부호가 갈리면 시기 의존이다."""
+    """First half versus second half. If the signs differ the result depends on the period."""
     values = np.asarray(values)
     if len(values) == 0:
         return {"front": {"mean_bp": np.nan, "t": np.nan, "n": 0},
@@ -88,7 +88,7 @@ def subperiod(values: np.ndarray, dates: pd.DatetimeIndex, lag: int = 21) -> dic
 
 
 def yearly(values: np.ndarray, dates: pd.DatetimeIndex, lag: int = 21) -> dict:
-    """연도별 일관성."""
+    """Consistency across years."""
     values = np.asarray(values)
     if len(values) == 0:
         return {"by_year": {}, "positive": 0, "total": 0, "positive_ratio": np.nan}
@@ -107,16 +107,16 @@ def yearly(values: np.ndarray, dates: pd.DatetimeIndex, lag: int = 21) -> dict:
 
 def oos_holdout(values: np.ndarray, dates: pd.DatetimeIndex,
                 months: int = 12, lag: int = 21) -> dict:
-    """OOS 홀드아웃 — 최근 N개월을 떼어 검정.
+    """OOS holdout: set the last N months aside and test on them.
 
-    표본이 작으면 t 가 낮게 나오는 게 정상이다. '죽었다'와 '못 잰다'를 구분하려면
-    n_days 를 함께 봐야 한다.
+    With a small sample a low t is normal. To tell 'dead' from 'cannot be measured'
+    look at n_days as well.
     """
     values = np.asarray(values)
     if len(values) == 0:
         return {"IS": {"mean_bp": np.nan, "t": np.nan, "n": 0},
                 "OOS": {"mean_bp": np.nan, "t": np.nan, "n": 0},
-                "cutoff": None, "note": "표본 없음 — 발화가 너무 드물거나 유니버스가 작습니다"}
+                "cutoff": None, "note": "no sample: firings are too rare or the universe is too small"}
     d = dates[: len(values)]
     cut = d[-1] - pd.DateOffset(months=months)
     out = {}
@@ -135,37 +135,37 @@ def run_gates(daily_excess: np.ndarray, dates: pd.DatetimeIndex, *,
               t_stat: float, net_bp: float, rho: float,
               fire: np.ndarray | None = None, tickers: pd.Index | None = None,
               cfg: GateConfig | None = None, lag: int = 21) -> dict:
-    """전 게이트를 순서대로 통과시키고 어디서 탈락했는지 기록한다."""
+    """Pass every gate in order and record where the candidate dropped out."""
     cfg = cfg or GateConfig()
     thr = cfg.null_threshold if cfg.null_threshold is not None else cfg.fallback_t
     res = {"config": asdict(cfg), "threshold": thr}
     steps: list[tuple[str, bool, str]] = []
 
     ok1 = abs(t_stat) > thr
-    steps.append(("G1 통계 문턱", ok1, f"|t|={abs(t_stat):.2f} vs {thr:.2f}"))
+    steps.append(("G1 statistical threshold", ok1, f"|t|={abs(t_stat):.2f} vs {thr:.2f}"))
 
     ok2 = (not cfg.require_net_positive) or (np.isfinite(net_bp) and net_bp > 0)
-    steps.append(("G2 비용 후 순수익", ok2, f"{net_bp:+.1f}bp"))
+    steps.append(("G2 net profit after costs", ok2, f"{net_bp:+.1f}bp"))
 
     sp = subperiod(daily_excess, dates, lag=lag)
     ok3 = (not cfg.require_subperiod_sign) or sp["sign_match"]
-    steps.append(("G3 시기분할 부호", ok3,
-                  f"전 {sp['front']['mean_bp']:+.1f} / 후 {sp['back']['mean_bp']:+.1f}"))
+    steps.append(("G3 sub-period sign", ok3,
+                  f"first {sp['front']['mean_bp']:+.1f} / second {sp['back']['mean_bp']:+.1f}"))
 
     ok4 = np.isfinite(rho) and abs(rho) >= cfg.min_monotonicity
-    steps.append(("G4 십분위 단조성", ok4, f"rho={rho:+.2f}"))
+    steps.append(("G4 decile monotonicity", ok4, f"rho={rho:+.2f}"))
 
     yr = yearly(daily_excess, dates, lag=lag)
     ok5 = np.isfinite(yr["positive_ratio"]) and yr["positive_ratio"] >= cfg.min_yearly_positive
-    steps.append(("G5 연도 일관성", ok5, f"{yr['positive']}/{yr['total']}년"))
+    steps.append(("G5 yearly consistency", ok5, f"{yr['positive']}/{yr['total']} years"))
 
     st = None
     if fire is not None and tickers is not None:
         st = fire_structure(fire, dates, tickers)
         ok6 = (st["max_name_share"] <= cfg.max_single_name_share
                and st["daily_turnover"] >= cfg.min_turnover)
-        steps.append(("G6 발화 구조", ok6,
-                      f"최다종목 {st['max_name_share']*100:.1f}% · 회전율 {st['daily_turnover']*100:.1f}%"))
+        steps.append(("G6 firing structure", ok6,
+                      f"top name {st['max_name_share']*100:.1f}% | turnover {st['daily_turnover']*100:.1f}%"))
 
     res["steps"] = [{"gate": g, "pass": bool(p), "detail": d} for g, p, d in steps]
     res["passed"] = all(p for _, p, _ in steps)

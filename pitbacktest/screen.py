@@ -1,13 +1,13 @@
-"""A · 팩터 스크리닝 + 중립화 엔진 — 리서치 단계의 첫 관문.
+"""A. Factor screening with neutralisation: the first gate of the research stage.
 
-이 단계가 결론을 가른다. 통계 문턱을 넘은 후보도 비용·시기·단조성 게이트와
-  재무 특성 중립화를 거치면 대부분 사라지는 것이 정상이다.
+This stage decides the conclusion. A candidate that clears the statistical threshold usually disappears after the cost, timing and
+    monotonicity gates and the neutralisation against firm characteristics; that is the normal outcome.
 
-원칙
-  1. 무통제 결과는 리턴하되 **기본 요약에서 제외**한다. 보고는 통제 후만.
-  2. 재무 특성이 없으면 경고한다 (ROA·BM 누락이 오판의 주원인).
-  3. 다중검정 문턱은 **셔플 귀무로 실측**한다.
-  4. 격자 최고값이 아니라 **전 분포**를 리턴한다.
+Principles
+    1. Uncontrolled results are returned but **left out of the default summary**. Only post-control results are reported.
+    2. Missing firm characteristics produce a warning (a missing ROA or book-to-market is the main cause of false findings).
+    3. The multiple-testing threshold is **measured with a shuffled null**.
+    4. The whole **distribution** of a parameter grid is returned, not its best cell.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class ScreenResult:
 
 def _deploy(fire: np.ndarray, cum: np.ndarray, ev: np.ndarray,
             cost_bp: float) -> tuple[np.ndarray, dict]:
-    # 유니버스 크기에 적응 — 고정 문턱은 소형 유니버스에서 전 날짜를 버린다
+    # adapt to the universe size: a fixed threshold throws away every date in a small universe
     med = float(np.median(ev.sum(axis=1)))
     min_pool = int(max(5, min(30, med * 0.5)))
     exc = []
@@ -57,10 +57,10 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
            fire_q: float = 0.10, n_null: int = 2,
            gate_config: GateConfig | None = None,
            neutralize_all: bool = True) -> ScreenResult:
-    """팩터 전수 스크리닝.
+    """Screen many factors at once.
 
-    factors  {이름: (date × ticker) 연속 팩터}
-    반환 summary 는 **통제 후 지표만** 담는다 (무통제는 factors[name]['raw'] 에).
+    factors  {name: (date x ticker) continuous factor}
+    The returned summary holds **post-control figures only** (uncontrolled ones are in factors[name]['raw']).
     """
     el = panel.eligible
     ev = el.values
@@ -68,7 +68,7 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     fwd = {h: panel.forward(h) for h in horizons}
     cums = {h: fwd[h].values.astype(np.float64) for h in horizons}
 
-    # 1) 셔플 귀무로 문턱 실측 — 팩터 개수만큼 돌리면 비싸므로 대표 팩터로 추정
+    # 1) measure the threshold with a shuffled null: running it for every factor is expensive, so a representative factor stands in
     rep = next(iter(factors.values()))
     null = shuffle_null(lambda rng: xs_norm(shuffle_columns(rep, el, rng), el),
                         el, {primary_h: fwd[primary_h]}, ctrl, n_rep=n_null)
@@ -105,7 +105,7 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
                         "decile": dec, "gates": g, "neutralized": neu}
         rows.append({
             "factor": name,
-            "t": fm[primary_h]["t"],                       # 통제 후
+            "t": fm[primary_h]["t"],                       # after controls
             "excess_bp": dep["excess_bp"], "net_bp": dep["net_bp"],
             "rho": dec["monotonicity_rho"],
             "neu_t": neu["t"] if neu else np.nan,
@@ -117,10 +117,10 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     surv = df.loc[df.passed, "factor"].tolist()
     n = len(df)
     funnel = {
-        "전체": n,
+        "all": n,
         f"G1 |t|>{thr:.2f}": int((df.t.abs() > thr).sum()),
-        "G2 비용후 순수익>0": int(((df.t.abs() > thr) & (df.net_bp > 0)).sum()),
-        "최종 통과": len(surv),
-        "중립화 후 잔존>50%": int((df["neu_survival_%"] > 50).sum()) if neutralize_all else None,
+        "G2 net of costs > 0": int(((df.t.abs() > thr) & (df.net_bp > 0)).sum()),
+        "passed all gates": len(surv),
+        "survival after neutralisation > 50%": int((df["neu_survival_%"] > 50).sum()) if neutralize_all else None,
     }
     return ScreenResult(null=null, factors=detail, survivors=surv, funnel=funnel, summary=df)

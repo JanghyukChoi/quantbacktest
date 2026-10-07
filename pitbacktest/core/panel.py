@@ -1,15 +1,15 @@
-"""패널 규약 — 모든 검정의 입력 계약.
+"""Panel convention: the input contract of every test.
 
-설계 원칙
-  · 코어는 **순수 pandas/numpy**. 외부 데이터 소스에 의존하지 않는다 (어댑터가 담당).
-  · 모든 매트릭스는 (date × ticker) 이고 index/columns 가 동일해야 한다.
-  · `eligible` 은 **PIT 유니버스**다. 그날 실제 거래 가능했던 종목만 True.
-    생존편향을 막는 유일한 장치이므로 필수 입력이다.
+Design principles
+    - The core is **plain pandas and numpy** and does not depend on any external data source (adapters do that).
+    - Every matrix is (date x ticker) and the index and columns must be identical.
+    - `eligible` is the **point-in-time universe**: True only for securities that could actually be traded that day.
+        It is the only device against survivorship bias, so it is a required input.
 
-시점 규약 (이 프로젝트 전체에서 단 하나만 쓴다)
-  신호는 close(t) 에 **확정**된다. 진입은 close(t+entry_lag), 청산은 close(t+entry_lag+h).
-  entry_lag 기본 1 — "신호를 보고 다음 날 산다". 0 은 같은 종가 체결 가정(공격적).
-  이 규약을 어기면 Panel.assert_no_lookahead() 가 잡는다.
+Timing convention (the only one used in the whole project)
+    A signal is **fixed** at close(t). Entry is at close(t+entry_lag) and exit at close(t+entry_lag+h).
+    entry_lag defaults to 1: "see the signal, buy the next day". 0 assumes a fill at the same close (aggressive).
+    Breaking this convention is caught by Panel.assert_no_lookahead().
 """
 
 from __future__ import annotations
@@ -26,11 +26,11 @@ OPTIONAL = ("open", "high", "low", "volume", "mkt_cap", "funding", "delist_after
 
 @dataclass
 class Panel:
-    """(date × ticker) 매트릭스 묶음.
+    """A bundle of (date x ticker) matrices.
 
-    close    수정주가 종가 — 수익률의 유일한 원천
-    eligible PIT 유니버스 bool. 그날 상장·거래가능·유동성조건 충족
-    나머지는 선택. volume·mkt_cap 이 있으면 유동성/규모 통제가 켜진다.
+    close    adjusted closing price: the only source of returns
+    eligible point-in-time universe bool: listed, tradable and passing the liquidity condition that day
+    The rest is optional. With volume and mkt_cap the liquidity and size controls are switched on.
     """
 
     close: pd.DataFrame
@@ -43,16 +43,18 @@ class Panel:
     chars: dict[str, pd.DataFrame] = field(default_factory=dict)
     market: str = "KR"
     entry_lag: int = 1
-    # 연율화에 쓰는 연간 거래일. 주식 252, 24/7 시장(크립토)은 365 로 둔다. 잘못 두면 CAGR, 샤프, 변동성이 틀린다.
+    # Trading days per year used for annualising: 252 for stocks, 365 for 24/7 markets (crypto). A wrong value makes CAGR, Sharpe and volatility wrong.
     periods_per_year: int = 252
-    # 선택: 선물 펀딩비(날짜 x 종목, 일합계, 양수면 롱이 지불). 상장폐지 표시(마지막 실제 봉이면 True). 어댑터 메모.
+    # Optional: futures funding (date x ticker, daily sum, positive means longs pay). Delisting flag (True on the last real bar). Notes for adapters.
     funding: pd.DataFrame | None = None
     delist_after: pd.DataFrame | None = None
     meta: dict = field(default_factory=dict)
 
-    # ---------------------------------------------------------------- 생성·검증
+    # ---------------------------------------------------------------- construction and validation
     def __post_init__(self) -> None:
         self.close = self.close.sort_index()
+        if self.close.index.has_duplicates:                    # before any reindex, which would fail with a less helpful pandas message
+            raise ValueError("close.index has duplicate dates")
         self.eligible = self.eligible.reindex(
             index=self.close.index, columns=self.close.columns
         ).fillna(False).astype(bool)
@@ -70,20 +72,20 @@ class Panel:
 
     def validate(self) -> None:
         if not self.close.index.is_monotonic_increasing:
-            raise ValueError("close.index 가 오름차순이 아닙니다")
+            raise ValueError("close.index is not ascending")
         if self.close.index.has_duplicates:
-            raise ValueError("close.index 에 중복 날짜가 있습니다")
+            raise ValueError("close.index has duplicate dates")
         if self.eligible.values.sum() == 0:
-            raise ValueError("eligible 이 전부 False 입니다")
+            raise ValueError("eligible is all False")
         if self.entry_lag < 0:
-            raise ValueError("entry_lag 는 0 이상이어야 합니다")
+            raise ValueError("entry_lag must be 0 or more")
         n = self.eligible.sum(axis=1)
         if (n[n > 0] < 10).mean() > 0.5:
             raise ValueError(
-                "eligible 종목이 절반 이상의 날짜에서 10개 미만입니다 — 횡단면 검정이 불가능합니다"
+                "eligible has fewer than 10 securities on more than half of the dates: cross-sectional tests are impossible"
             )
 
-    # ---------------------------------------------------------------- 파생
+    # ---------------------------------------------------------------- derived
     @property
     def dates(self) -> pd.DatetimeIndex:
         return self.close.index
@@ -93,14 +95,14 @@ class Panel:
         return self.close.columns
 
     def ret1(self) -> pd.DataFrame:
-        """일간 수익률 close(t)/close(t-1) − 1."""
+        """Daily return close(t)/close(t-1) - 1."""
         return self.close.pct_change(fill_method=None)
 
     def forward(self, h: int) -> pd.DataFrame:
-        """신호 t 기준 미래 h일 누적 수익률.
+        """Cumulative future return over h days for a signal at t.
 
-        entry_lag=1 이면 close(t+1) 진입 → close(t+1+h) 청산.
-        로그 누적 후 되돌려 중간 결측이 있어도 안전하게 합산한다.
+        entry_lag=1 enters at close(t+1) and exits at close(t+1+h).
+        Accumulated in logs and converted back, so a missing value in between does not break the sum.
         """
         lag = self.entry_lag
         entry = self.close.shift(-lag)
@@ -121,22 +123,22 @@ class Panel:
         return h.hexdigest()[:16]
 
     def adv(self, window: int = 20) -> pd.DataFrame:
-        """평균 거래대금. volume 이 없으면 None."""
+        """Average traded value. None if there is no volume."""
         if self.volume is None:
             return None
         return (self.close * self.volume).rolling(window, min_periods=window).mean()
 
-    # ---------------------------------------------------------------- 안전장치
+    # ---------------------------------------------------------------- safeguards
     def assert_no_lookahead(self, signal: pd.DataFrame, h: int = 5,
                             n_null: int = 8, seed: int = 0) -> dict:
-        """룩어헤드 탐지 — 신호를 하루 **뒤로** 밀었을 때 성과가 오르면 미래를 보고 있다.
+        """Look-ahead detection: if the result improves when the signal is pushed one day **later**, it is looking at the future.
 
-        정상 신호는 시점을 늦추면 성과가 떨어진다(정보가 소멸하므로).
-        늦췄는데 오르면 그 신호는 이미 미래 정보를 담고 있다는 뜻이다.
+        A normal signal gets worse when delayed (the information decays).
+        If it improves after the delay, the signal already contains future information.
 
-        ⚠️ 단순히 `lagged > base` 로 판정하면 **무작위 팩터가 50% 확률로 오판**된다.
-           둘 다 0 근처라 부호가 우연히 갈리기 때문. 그래서 무작위 셔플로 스프레드의
-           노이즈 규모(sd)를 실측하고, 그 2σ 를 허용오차로 쓴다.
+        Warning: judging by a bare `lagged > base` makes a **random factor wrong 50% of the time**:
+              both are near zero so the sign flips by chance. So the noise scale (sd) of the spread is measured with random shuffles
+              and twice that sd is used as the tolerance.
         """
         fwd = self.forward(h)
         base = _spread(signal, fwd, self.eligible)
@@ -160,12 +162,12 @@ class Panel:
                 "tol_bp": tol * 1e4, "pass": bool(ok)}
 
     def audit(self) -> dict:
-        """데이터 무결성 감사 — 검정 전에 반드시 한 번 돌린다.
+        """Data integrity audit: run it once before any test.
 
-        흔한 데이터 결함을 잡는다:
-          · 조용한 절단   (특정 날짜 이후 데이터가 통째로 사라짐)
-          · 수정주가 불일치 (갭 극단값이 일간 변동보다 많음 — adj_open 결함 유형)
-          · 유니버스 급변  (모집단이 시간에 따라 3배 늘어나는 등)
+        It catches common data defects:
+            - silent truncation   (data vanishes wholesale after some date)
+            - adjusted-price mismatch (more extreme gaps than daily moves: the adj_open defect type)
+            - universe jumps      (the population triples over time, for example)
         """
         out = {}
         n = self.eligible.sum(axis=1)
@@ -186,16 +188,16 @@ class Panel:
             out["gap_vs_daily_ratio"] = float(ratio)
             out["adj_price_consistent"] = bool(ratio < 3.0)
 
-        # 조용한 절단: 종목 커버리지가 특정 시점 이후 급감
+        # silent truncation: security coverage drops sharply after some date
         cov = self.close.notna().sum(axis=1)
         if len(cov) > 60:
             tail = cov.iloc[-20:].mean(); body = cov.iloc[:-20].median()
             out["tail_coverage_ratio"] = float(tail / body) if body else np.nan
             out["truncation_suspected"] = bool(tail < body * 0.5)
 
-        # 생존편향 의심: 실제 시장에서는 해마다 일정 비율의 종목이 사라진다. 패널 끝 이전에 가격이 끊긴 종목이
-        # 거의 없다면 그 패널은 '오늘 살아 있는 종목'만 모은 것이다. 측정: yfinance 로 상장폐지·인수된 유명 종목
-        # 42개를 조회했더니 정확한 이력을 돌려준 것이 0개였다(docs/survivorship.md).
+        # suspected survivorship bias: in a real market a steady share of securities disappears every year. If almost no security's price stops before the panel's end,
+        # the panel holds only 'securities alive today'. Measured: of 42 well-known delisted or acquired stocks looked up in yfinance,
+        # none came back with a correct history (docs/survivorship.md).
         last = self.close.apply(lambda c: c.last_valid_index())
         ended = last.dropna() < (self.dates[-1] - pd.Timedelta(days=30))
         span_years = (self.dates[-1] - self.dates[0]).days / 365.25
@@ -206,7 +208,7 @@ class Panel:
 
 def _spread(signal: pd.DataFrame, fwd: pd.DataFrame, eligible: pd.DataFrame,
             q: float = 0.10) -> float:
-    """상위 q − 하위 q 스프레드 평균 (룩어헤드 검사용 내부 헬퍼)."""
+    """Mean top-q minus bottom-q spread (internal helper for the look-ahead check)."""
     rk = signal.where(eligible).rank(axis=1, pct=True, na_option="keep")
     hi, lo = ((rk >= 1 - q) & eligible).values, ((rk <= q) & eligible).values
     c = fwd.values.astype(np.float64)
@@ -221,11 +223,11 @@ def _spread(signal: pd.DataFrame, fwd: pd.DataFrame, eligible: pd.DataFrame,
 def build_pit_eligible(close: pd.DataFrame, *, listed: pd.DataFrame | None = None,
                        min_adv: float = 0.0, volume: pd.DataFrame | None = None,
                        exclude: pd.DataFrame | None = None) -> pd.DataFrame:
-    """PIT 유니버스 마스크 생성 헬퍼.
+    """Helper that builds a point-in-time universe mask.
 
-    listed   상장 여부 bool (없으면 close 존재 여부로 대체)
-    min_adv  최소 평균거래대금 (volume 필요)
-    exclude  관리종목·거래정지 등 제외 마스크 (True = 제외)
+    listed   listing flag bool (falls back to whether close exists)
+    min_adv  minimum average traded value (needs volume)
+    exclude  mask of securities to exclude, such as administrative issues and trading halts (True = exclude)
     """
     ok = close.notna() & (close > 0)
     if listed is not None:

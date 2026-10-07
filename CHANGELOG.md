@@ -16,6 +16,12 @@
 - `pitbacktest.adapters.tiingo`: random-sample downloader and panel builder that keeps delisted securities (free account).
 - `pitbacktest.adapters.krx`: official KRX OpenAPI adapter; Korean survivorship study in `studies/korea_survivorship`.
 - `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
+- Docstrings, comments, warnings and example output are now in English (the Korean left is the security-name filter and the quota message of the
+  KRX adapter, which must match Korean text). Gate names and the `screen()` funnel keys are English too.
+- **Fixed**: duplicate dates in `close` now raise the library's own clear message; before, pandas failed first with an opaque `reindex` error.
+- **Fixed**: the `backtest_event` warning about too few days described an old rule; it now states the adaptive pool threshold the code uses.
+- Test coverage 74% -> 85% (spread estimators, crypto costs, event signals and their dummy-regression neutralisation, the yfinance adapter's
+  warnings, the Binance downloader, panel validation).
 - **Fixed**: Sortino used the standard deviation of negative returns instead of the downside deviation.
 - **Fixed**: `neutralize` returned rounding noise when a factor lay inside the span of the controls; after a rank-normalisation that noise
   became a full-scale signal and the result depended on the BLAS build (seen as a failure on Python 3.10 only). Such days are now NaN.

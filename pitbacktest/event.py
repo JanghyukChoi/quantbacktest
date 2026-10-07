@@ -1,15 +1,15 @@
-"""C · 이벤트형 시그널 검정 — 개별 알림으로 성립하는가.
+"""C. Event-signal test: does it hold up as individual alerts?
 
-포트폴리오 지표(평균 초과수익)는 평균이 실현된다고 가정한다. 그러나 알림은 사용자가
-건별로 받으므로 **승률·중앙값·손익비**가 실제 체감을 결정한다.
+Portfolio metrics (mean excess return) assume the mean is realised. A user receives alerts one by one, though, so the **win rate,
+median and payoff ratio** decide what it feels like.
 
-반드시 분해하는 것
-  승률 = 기저승률(표본을 어떻게 골랐나) + lift(신호가 더한 것)
-    · 보유가 길수록 승률과 기저가 함께 오른다. lift 로만 판단해야 한다.
-    · 승률이 기저승률보다 낮으면(lift < 0) 신호가 오히려 해로운 것이다.
-  평균 vs 중앙값
-    · 부호가 갈리면 소수 대박이 다수 손실을 덮는 구조다. 포트폴리오는 되지만 알림은 안 된다.
-    · 평균은 양수인데 중앙값이 음수인 경우가 대표적이다.
+What is always decomposed
+    win rate = base rate (how the sample was picked) + lift (what the signal adds)
+        - A longer holding period raises the win rate and the base rate together. Judge by the lift only.
+        - A win rate below the base rate (lift < 0) means the signal does harm.
+    mean vs median
+        - If the signs differ, a few big winners cover many losses: it works as a portfolio and not as alerts.
+        - The typical case is a positive mean with a negative median.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class EventResult:
 
 def _trade_stats(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
                  cost: float) -> dict | None:
-    """건별 손익 분포 + 기저승률."""
+    """Per-trade profit distribution plus the base win rate."""
     tr, bh, bn = [], 0.0, 0
     for i in range(cum.shape[0]):
         s = fire[i] & np.isfinite(cum[i])
@@ -76,10 +76,10 @@ def _trade_stats(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
 
 def _daily_excess(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
                   *, min_fire: int = 1, min_pool: int | None = None) -> np.ndarray:
-    """날짜별 발화군 초과수익 (게이트 입력).
+    """Daily excess return of the firing group (gate input).
 
-    min_pool 을 고정하면 소형 유니버스(예: 20종목 테스트)에서 전 날짜가 버려진다.
-    기본값은 유니버스 중앙 크기의 절반(최대 30)으로 **적응**시킨다.
+    A fixed min_pool throws away every date in a small universe (for example a 20-name test).
+    The default **adapts** to half the median universe size (at most 30).
     """
     if min_pool is None:
         med = float(np.median(eligible.sum(axis=1)))
@@ -99,13 +99,13 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
                    neutralize_check: bool = True,
                    gate_config: GateConfig | None = None,
                    null_threshold: float | None = None) -> EventResult:
-    """이벤트형 시그널 검정.
+    """Event-signal test.
 
-    signal   bool 또는 0/1 매트릭스 (date × ticker). True = 그날 발화.
-    cost_bp  왕복 거래비용. 종목별 실측이 있으면 portfolio 쪽 spread_panel 을 쓸 것.
+    signal   bool or 0/1 matrix (date x ticker). True = fires that day.
+    cost_bp  round-trip trading cost. If per-security measured costs exist, use the spread panel on the portfolio side.
 
-    중립화 검정이 켜져 있으면(기본) **더미 회귀**로 특성 통제 후 기여를 재측정한다.
-    이벤트 신호는 연속 팩터가 아니므로 잔차화가 아니라 더미 계수로 본다.
+    With the neutralisation test on (the default) the contribution after controls is re-measured with a **dummy regression**.
+    An event signal is not a continuous factor, so it is read through a dummy coefficient and not through residuals.
     """
     sig = signal.reindex(index=panel.dates, columns=panel.tickers).fillna(False)
     fire = (sig.astype(bool) & panel.eligible).values
@@ -127,16 +127,16 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
 
     if not per_h:
         raise ValueError(
-            "검정 가능한 호라이즌이 없습니다. 발화가 너무 드물거나(건수<100) "
-            "eligible 종목이 부족합니다. signal·eligible·horizons 를 확인하십시오.")
-    # 대표 호라이즌 = lift 가 최대인 곳
+            "No horizon can be tested. Either the signal fires too rarely (fewer than 100 events) or "
+            "too few securities are eligible. Check signal, eligible and horizons.")
+    # representative horizon = where the lift is largest
     best_h = max(per_h, key=lambda h: per_h[h].get("lift_pp", -99))
     de = _daily_excess(fire, cums[best_h], ev)
     if len(de) < 100:
         warnings.warn(
-            f"날짜별 초과수익 표본이 {len(de)}일뿐이라 게이트를 신뢰할 수 없습니다. "
-            f"_daily_excess 는 발화 3종목 이상 & 유니버스 30종목 이상인 날만 셉니다 — "
-            f"유니버스가 작으면(예: 20종목) 대부분의 날이 제외됩니다.", stacklevel=2)
+            f"Only {len(de)} days of daily excess return, so the gates cannot be trusted. "
+            f"_daily_excess counts only days with at least one firing name and a pool of at least max(5, min(30, half the "
+            f"median universe)) names, so a short sample or a rarely firing signal leaves few days.", stacklevel=2)
 
     from .core.estimators import decile_profile
     dec = decile_profile(sig.astype(float), panel.forward(best_h), panel.eligible,
@@ -161,10 +161,10 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
 
 def _dummy_neutralized(panel: Panel, fire: np.ndarray, cums: dict,
                        horizons: tuple[int, ...], min_obs: int = 30) -> dict:
-    """이벤트 더미 회귀 — 특성 통제 후에도 발화가 수익률을 예측하는가.
+    """Event dummy regression: does firing still predict returns after controlling for characteristics?
 
-    표본: 그날 eligible 전체. 종속: 미래수익. 독립: [발화더미] + 통제변수.
-    더미 계수가 곧 '같은 특성에서 발화가 더하는 것'이다.
+    Sample: every eligible name that day. Dependent: the future return. Independent: [firing dummy] + controls.
+    The dummy coefficient is 'what firing adds among names with the same characteristics'.
     """
     ctrl = build_controls(panel)
     cvs = [c.values.astype(np.float64) for c in ctrl.values()]

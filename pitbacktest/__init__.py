@@ -1,15 +1,15 @@
-"""pitbacktest — KR/US 통합 퀀트 백테스트 프레임워크.
+"""pitbacktest: a backtest toolkit that measures its own biases (US, Korea, crypto).
 
-세 진입점
-  screen()             A. 팩터 전수 스크리닝 + 중립화     (리서치 단계)
-  backtest_event()     C. 이벤트형 시그널 (알림 제품)
-  backtest_portfolio() B. 포트폴리오 알파 (CAGR·MDD·Sharpe)
+Three entry points
+    screen()             A. Factor screening with neutralisation          (research stage)
+    backtest_event()     C. Event signals                                  (alert products)
+    backtest_portfolio() B. Portfolio alpha (CAGR, MDD, Sharpe)
 
-설계 원칙
-  · 코어는 순수 pandas/numpy. 데이터 소스는 adapters 로 분리.
-  · 시점 규약은 하나뿐이고 assert 로 강제한다.
-  · 재무 특성 통제가 기본값이다.
-  · 무통제 결과는 요약에서 제외한다.
+Design principles
+    - The core is plain pandas and numpy; data sources live in `adapters`.
+    - There is one timing convention and it is enforced with an assert.
+    - Controls for firm characteristics are the default.
+    - Uncontrolled results are left out of the summary.
 """
 
 from .core.panel import Panel, build_pit_eligible

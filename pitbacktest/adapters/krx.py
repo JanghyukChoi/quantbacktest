@@ -38,6 +38,8 @@ RENAME = {"ISU_CD": "code", "ISU_NM": "name", "MKT_NM": "market", "TDD_CLSPRC": 
           "TDD_OPNPRC": "open", "TDD_HGPRC": "high", "TDD_LWPRC": "low", "ACC_TRDVOL": "volume", "ACC_TRDVAL": "value",
           "MKTCAP": "mktcap", "LIST_SHRS": "shares"}
 # Not tradable common stock for a cross-sectional study: SPACs, REITs and funds listed as stocks.
+# Korean name patterns that mark SPACs (스팩), REITs (리츠), numbered funds (N호), and infrastructure funds (인프라, 맥쿼리). These must stay Korean:
+# they are matched against the names KRX returns.
 DEFAULT_EXCLUDE = re.compile(r"스팩|리츠|\d+호|인프라|맥쿼리")
 
 
@@ -66,7 +68,7 @@ def _call(path: str, date: str, key: str, retries: int = 4) -> list[dict]:
                 return json.loads(r.read()).get("OutBlock_1", [])
         except urllib.error.HTTPError as e:
             body = e.read()[:200].decode("utf-8", "replace")
-            if e.code in (429, 403) or "limit" in body.lower() or "초과" in body:
+            if e.code in (429, 403) or "limit" in body.lower() or "초과" in body:   # "초과" = "exceeded", the wording of the KRX quota message
                 raise QuotaExceeded(f"HTTP {e.code}: {body}") from None
             if e.code >= 500 and i < retries:
                 time.sleep(delay); delay *= 2

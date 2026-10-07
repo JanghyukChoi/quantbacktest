@@ -1,14 +1,14 @@
-"""B · 포트폴리오 알파 백테스트 — 신호를 운용 결과로.
+"""B. Portfolio alpha backtest: from a signal to a result.
 
-시점 규약 (버그가 난 지점이므로 명시)
-  holdings[d] = t = d-hold+1 … d 신호의 트랜치 평균. 신호는 close(d) 확정,
-  진입 close(d+entry_lag), 수익은 close(d+entry_lag) → close(d+entry_lag+1).
-  진입이 하루 늦어지는 off-by-one 버그는 1일 평균회귀 전략에서는 수익 대부분을 지운다.
-  assert_timing() 이 이를 잡는다.
+Timing convention (stated because this is where the bug was)
+    holdings[d] = the average of the tranches from the signals of days t = d-hold+1 ... d. A signal is known at close(d),
+    entered at close(d+entry_lag), and earns close(d+entry_lag) -> close(d+entry_lag+1).
+    An entry that is one day late (off by one) wipes out most of the profit of a 1-day mean-reversion strategy.
+    assert_timing() catches it.
 
-비용
-  회전율 비례. **종목별 실측 스프레드 패널 사용을 권장**한다.
-  일괄 가정은 회전율이 높은 전략의 성과를 크게 부풀릴 수 있다.
+Costs
+    Proportional to turnover. **Use a per-security measured spread panel.**
+    A flat assumption can inflate the result of a high-turnover strategy a lot.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ class PortfolioResult:
 
 
 def _tranche(weights: np.ndarray, hold: int) -> np.ndarray:
-    """중첩 트랜치: d일 보유 = t = d-hold+1 … d 신호의 평균 (매일 자본 1/hold 씩 진입)."""
+    """Overlapping tranches: the position on day d is the average of the signals of days t = d-hold+1 ... d (each day 1/hold of capital enters)."""
     T, N = weights.shape
     out = np.zeros((T, N))
     run = np.zeros(N)
@@ -100,7 +100,7 @@ def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
             "vol": float(s.std() * np.sqrt(ann)),
             "years": float(yrs), "pos_days": float((s > 0).mean()),
             "mdd_peak": str(peak.date()), "mdd_trough": str(trough.date()),
-            "mdd_recovered": str(recov[0].date()) if len(recov) else "미회복"}
+            "mdd_recovered": str(recov[0].date()) if len(recov) else "not recovered"}
 
 
 def _forward_arrays(panel: Panel, funding: bool, delist_return: float | None):
@@ -146,20 +146,20 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        grid: bool = True, funding: bool = True,
                        delist_return: float | None = None,
                        ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
-    """팩터 → 포트폴리오 성과.
+    """Factor -> portfolio result.
 
-    factor      연속 팩터 (높을수록 롱). bool 이면 롱온리 발화로 해석.
-    long_q      롱 분위 (상위 q). short_q=None 이면 롱온리.
-    weighting   equal | signal (신호강도 비례) | rank
-    spread_bp   **단위가 두 가지다.** 스칼라는 왕복(round trip) 스프레드: 거래한 비중 1단위당 spread_bp/2 를 낸다
-                (편도 비용 c bp 를 쓰려면 2*c 를 넘긴다). (date × ticker) 패널은 편도(one-way) 비용 bp 그대로
-                거래한 비중에 곱한다. 스칼라 20 == 패널 10 이다(tests/test_reconcile.py 가 고정한다).
-    benchmark   cap(시총가중) | equal(동일가중) | None
-    funding     panel.funding 이 있으면 롱은 지불, 숏은 수취로 반영 (선물). False 면 무시
-    ledger      pitbacktest.ledger.Ledger. 주면 이 실행을 장부에 기록한다(시도 횟수를 deflated Sharpe 에 자동 반영하려고).
-    family      장부에서 같은 연구 질문을 묶는 이름. name 은 이 시도의 라벨(같은 라벨이어도 설정이 다르면 다른 시도).
-    delist_return  panel.delist_after 로 표시된 종목의 마지막 실제 봉 **다음 날** 수익률 가정.
-                None 이면 0 (마지막 가격에 청산됐다고 가정 — 낙관적일 수 있음). 예: -0.5 로 민감도를 본다.
+    factor      continuous factor (higher = long). A bool is read as a long-only firing.
+    long_q      long quantile (top q). short_q=None means long-only.
+    weighting   equal | signal (proportional to signal strength) | rank
+    spread_bp   **Two units.** A scalar is a round-trip spread: each unit of weight traded pays spread_bp/2
+                            (to use a one-way cost of c bp, pass 2*c). A (date x ticker) panel is a one-way cost in bp, multiplied
+                            by the weight traded as it is. A scalar 20 equals a panel of 10 (pinned by tests/test_reconcile.py).
+    benchmark   cap (market-cap weighted) | equal (equal weighted) | None
+    funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
+    ledger      pitbacktest.ledger.Ledger. If given, this run is recorded in it, so the number of trials reaches the deflated Sharpe.
+    family      name that groups runs of one research question in the ledger. name labels this trial (the same label with other settings is another trial).
+    delist_return  assumed return on the day **after** the last real bar of a security flagged in panel.delist_after.
+                            None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
     """
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
@@ -240,7 +240,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
               "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": panel.periods_per_year,
-              "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp 일괄",
+              "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp flat",
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,
@@ -248,10 +248,10 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
 
 
 def assert_timing(panel: Panel) -> dict:
-    """시점 정렬 자기검증 — 완전예지 팩터를 넣어 수익이 나오는지 본다.
+    """Timing self-check: feed a perfect-foresight factor and see whether it earns money.
 
-    미래 수익률을 그대로 팩터로 쓰면 CAGR 이 크게 양수여야 한다. 아니면 시점이 어긋난 것이다.
-    (진입 지연 버그를 잡는 회귀 테스트)
+    Using the future return as the factor must give a clearly positive CAGR. If not, the timing is misaligned.
+    (A regression test for entry-lag bugs.)
     """
     lag = panel.entry_lag
     oracle = panel.close.shift(-(lag + 1)) / panel.close.shift(-lag) - 1.0
@@ -260,4 +260,4 @@ def assert_timing(panel: Panel) -> dict:
     ok = np.isfinite(r.metrics["CAGR"]) and r.metrics["CAGR"] > 0.5
     return {"oracle_CAGR": r.metrics["CAGR"], "oracle_Sharpe": r.metrics["Sharpe"],
             "pass": bool(ok),
-            "note": "완전예지 팩터가 큰 양수를 내야 정상. 실패면 entry_lag 또는 fwd 정렬 오류."}
+            "note": "A perfect-foresight factor must give a large positive number. If it fails, entry_lag or the fwd alignment is wrong."}

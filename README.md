@@ -4,12 +4,32 @@
 
 The Python package is named `pitbacktest` (`import pitbacktest`); the repository is `quantbacktest`.
 
-A small backtest harness for factor screening, event signals and portfolio alphas. Core dependencies are
-`pandas` and `numpy` only.
+**A backtest toolkit that measures its own biases.** Most backtest libraries compute a return and leave you to wonder how much
+of it is survivorship, look-ahead, a flattering cost assumption, or luck from trying many variants. Here each of those is either a
+measured number or a refused input, for US stocks, Korean stocks and crypto perpetuals. Core dependencies are `pandas` and `numpy`.
+It is not a strategy and ships no data.
 
-It is not a strategy and ships no data. Its purpose is to make the usual backtest mistakes hard to make:
-one timing convention that is asserted in code, controls for firm characteristics by default, and reporting
-that refuses to show an impressive raw number before the controls are applied.
+What is different:
+
+- **Survivorship is measured, not assumed.** A free yfinance download returned a correct history for 0 of 42 well-known delisted or
+  acquired US stocks; a free Tiingo key returned 23 of 29 takeover and rename cases but **none of 12 bankruptcies and rescue sales**
+  (`docs/survivorship.md`). On Korean stocks, where the official KRX data is survivorship-free, restricting to today's survivors moved
+  the net Sharpe of four factors by -0.23 to +0.20 depending on the factor, averaging about zero, and the understatement of low
+  volatility survived neutralisation against the other styles (`studies/korea_survivorship`).
+- **Preregistered studies, with their corrections kept.** Rules are committed before results; when a cost model turned out wrong, the
+  original results stayed, an amendment explained it, and both are reported.
+- **Overfitting is counted, not recalled.** Deflated Sharpe, PBO and a permutation test, plus a hash-chained trial ledger that records
+  every run so the number of variants you tried cannot be understated from memory.
+- **One timing convention, asserted in code**, point-in-time universes, firm-characteristic controls by default, and reporting that
+  refuses to show an impressive raw number before the controls are applied.
+- **Costs and capacity:** spread, borrow and square-root market impact for weights you supply, a capacity curve, and an intraday layer
+  (1-minute Binance bars) that shows how fast an edge decays with latency and at what cost it stops paying.
+- **Checked against independent implementations**, not just against itself: the portfolio engine equals a plain-loop reimplementation to
+  1e-17, alpha/beta equal statsmodels' Newey-West regression and IC equals scipy's Spearman, the intraday parser reproduces Binance's own
+  daily files, and over 40 deliberately planted bugs are each caught by the tests.
+
+What it cannot do, stated up front: it has no order book (so no queue, partial fills or impact below a bar), it does not ship an
+optimiser or point-in-time fundamentals, and only Linux is tested. See **Limits**.
 
 ## Markets
 
@@ -217,6 +237,9 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_costs_events.py    # spread estimators, crypto costs, event signals and their neutralisation, FM with missing returns, panel checks
+python tests/test_yfinance_adapter.py # the free-data adapter against a fake yfinance: when it warns about survivorship, market-cap paths, errors
+python tests/test_binance_archive.py # the downloader on a fake network: retries, 404, listings, daily bars, funding sums, cache
 python tests/test_intraday.py        # intraday layer on a fake archive: parsing, aggregation, point in time, latency, funding, break-even, memory, download
 python tests/test_packaging.py       # version, Python floor, CI matrix and classifiers agree
 python tests/smoke_installed.py     # run from outside the repo against an installed wheel (what the CI package job does)
@@ -241,6 +264,9 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| CE1 to CE10 | Roll recovers a 2 cent spread, Corwin-Schultz a 40 bp one, the spread model its coefficients, the crypto cost model is exact, an event signal that only echoes a control keeps -8% of its effect after controls while a real 100 bp effect keeps 102%, Fama-MacBeth with missing returns equals a per-day least squares, the paired difference, panel validation and the point-in-time mask follow their documentation |
+| Y1 to Y5 | the yfinance adapter warns that it is not point in time every time, warns about survivors-only only with 30+ tickers none of which end early, reports partial market-cap coverage with counts, and refuses nothing-eligible and one-ticker panels |
+| B1 to B7 | the Binance downloader retries a 503 and not a 403, treats 404 as missing, follows paginated listings, sums 8-hour funding settlements per day in both timestamp units, drops today's unfinished bar, caches, and survives one failing symbol |
 | I1 to I10, I11 | 1-minute parsing in both timestamp units, aggregation equal to an independent loop, eligibility one day behind (first eligible bar is the listing day + 5 whole days), a knows-one-bar-ahead signal earns at lag 1 and nothing at lag 2, funding paid exactly once per settlement, break-even cost makes the net mean zero, memory guard, resumable download with recorded 404s, halts and no-trade stretches. Planted bugs (shifted labels, same-day eligibility, wrong funding bar, dropped partial bars and others) are caught |
 | P1, P2 | the version is the same in pyproject, `__version__` and the changelog; the declared Python floor, the classifiers and the CI matrix agree, and the matrix tests the oldest declared pandas and numpy |
 | R8 | `neutralize` equals a least-squares solution; a factor inside the controls' span gives NaN even with rounding noise (found because the old behaviour made one test fail on Python 3.10 only) |
@@ -253,7 +279,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 
 - No bundled data. The yfinance adapter is not point-in-time; the Binance archive and KRX paths are. US stocks need data you bring.
 - Fundamentals (`chars`) must be supplied by the user for the controls to be complete; without them it warns.
-- Docstrings and some code comments are in Korean. This README is the English documentation.
+- Everything is in English except the Korean security-name patterns and the quota message the KRX adapter has to match.
 - For research and education. Nothing here is investment advice.
 
 ## License
