@@ -71,6 +71,8 @@ class Panel:
         self.validate()
 
     def validate(self) -> None:
+        """Raise ValueError if the panel breaks its invariants: the date index ascending and without duplicates, at least one eligible
+        security, `entry_lag` not negative, and at least 10 eligible securities on half of the dates or more. Runs on construction."""
         if not self.close.index.is_monotonic_increasing:
             raise ValueError("close.index is not ascending")
         if self.close.index.has_duplicates:

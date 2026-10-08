@@ -26,6 +26,14 @@ def panel_from_long(df: pd.DataFrame, *, id_col: str = "id", date_col: str = "da
                     min_age_days: int = 60, adv_window: int = 30, min_adv: float | None = None,
                     ended_gap_days: int = 30, entry_lag: int = 1, market: str = "US",
                     periods_per_year: int = 252) -> Panel:
+    """Build a Panel from a long table, one row per security and day (columns and checks: see the module docstring).
+
+    Raises KeyError for a missing required column and ValueError for duplicate (id, date) rows or non-positive closes.
+    Eligibility is `in_universe_col` when given; otherwise at least `min_age_days` of history and, when `min_adv` and a volume column are
+    given, a trailing median traded value (close x volume over `adv_window` rows) of at least `min_adv`. `volume_col` is a quantity.
+    A security whose last row is more than `ended_gap_days` before the last date is flagged in `delist_after`, and only for those a
+    `delist_return_col` value is compounded into the last close. `panel.meta` records the row and security counts, how many ended early,
+    how many delisting returns were applied, and the tickers used by more than one id."""
     need = [id_col, date_col, close_col]
     miss = [c for c in need if c not in df.columns]
     if miss:

@@ -40,6 +40,11 @@ def array_fingerprint(a) -> str:
 
 
 class Ledger:
+    """Append-only, hash-chained record of backtest runs; see the module docstring for what it does and does not guarantee.
+
+    Pass it as `ledger=` to `backtest_portfolio` or `backtest_weights` (or call `record`), then ask `deflated_sharpe(family)`: the number of
+    trials comes from the record, not from memory. `path` is a folder (created if missing)."""
+
     def __init__(self, path):
         self.dir = Path(path)
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -65,6 +70,7 @@ class Ledger:
         return out
 
     def n_trials(self, family: str | None = None) -> int:
+        """Number of distinct configurations recorded in `family` (all families if None). Running an identical configuration again adds nothing."""
         return len(self.trials(family))
 
     # ----------------------------------------------------------------- write

@@ -48,6 +48,7 @@ class PortfolioResult:
         return alpha_beta(self.net_returns, factors, **kw)
 
     def sharpe_ci(self, **kw) -> dict:
+        """Bootstrap interval for the Sharpe ratio of `net_returns`. Keyword arguments go to `analytics.sharpe_ci`."""
         from .analytics import sharpe_ci
         kw.setdefault("periods_per_year", self.spec.get("periods_per_year", ANN))
         return sharpe_ci(self.net_returns, **kw)
@@ -78,6 +79,8 @@ def _normalize(mask_or_w: np.ndarray) -> np.ndarray:
 
 
 def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
+    """Annualised figures of a net return series: CAGR, MDD, Sharpe, Sortino (downside deviation, target 0), Calmar, vol, years, the share of
+    positive days and the drawdown dates. With fewer than `ann // 2` observations it warns and returns NaN for CAGR, MDD and Sharpe only."""
     s = pd.Series(net, index=dates[: len(net)]).dropna()
     if len(s) < ann // 2:
         # Annualised figures from under half a year are not reported. Say so: a NaN with no explanation looks like a bug, and

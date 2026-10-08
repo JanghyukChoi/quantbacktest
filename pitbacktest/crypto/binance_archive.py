@@ -144,6 +144,8 @@ class ArchiveStore:
         return sorted(k for k in keys if k.endswith(".zip"))
 
     def fetch_daily(self, sym: str, live: bool) -> pd.DataFrame | None:
+        """Daily bars (open, high, low, close, volume, quote_volume, trades) indexed by UTC date: the monthly archive files plus, when `live`
+        is True, the live API for the days after the last archived one. The unfinished current day is dropped. Cached as a pickle."""
         f = self.dir / "daily" / f"{sym}.pkl"
         if f.exists():
             return pd.read_pickle(f)
@@ -171,6 +173,8 @@ class ArchiveStore:
         return df
 
     def fetch_funding(self, sym: str, live: bool) -> pd.Series | None:
+        """Funding rate summed per UTC day (every settlement inside the day), from the monthly fundingRate files plus, when `live` is True,
+        the live API. The current day is dropped. Cached as a pickle. For settlement instants see `crypto.intraday.fetch_funding_events`."""
         f = self.dir / "funding" / f"{sym}.pkl"
         if f.exists():
             return pd.read_pickle(f)
