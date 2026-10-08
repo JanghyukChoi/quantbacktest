@@ -51,6 +51,9 @@
   (`docs/crypto_spread_check.md`, `docs/crypto_spread_probe.py`). The default flat 2 bp (7 bp for thin contracts) was far above the quote for the liquid ones (100 to 200 times for BTC and
   ETH) and above the default for only 1 of 12. The quote is one price tick for 9 of 12; for the others the exchange has cut the tick since (10, 10 and 100 times). New
   `liquidity_cost_bp(spread_estimator="tick", tick_size=...)`. The default is unchanged because the preregistered study used it.
+- **Impact coefficient against the order book.** `docs/crypto_impact_check.md`, `docs/crypto_impact_study.py`: from the public `bookDepth` files (30 contracts, 10 days),
+  the Y the visible book implies is about 0.1 to 0.8 for orders up to 0.3 percent of a day's turnover and 1.2 to 2.7 at 1 percent, so `Y = 1` overstates small orders and understates
+  large ones; `capacity_curve(y_values=(0.5, 1.0, 2.0))` brackets it. The size dependence is built into the interpolation and is not a finding. `ImpactModel` is unchanged.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.
