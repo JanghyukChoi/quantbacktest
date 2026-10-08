@@ -36,7 +36,7 @@
    {
     "name": "V3 costs: Sharpe falls as the spread rises",
     "ok": true,
-    "detail": "+0.61 > +0.10 > -0.92 > -2.45"
+    "detail": "falls at each of 4 spreads (0, 10, 30, 60 bp): by 0.51, 1.02, 1.53"
    },
    {
     "name": "V4 determinism: two runs are identical",
@@ -100,7 +100,7 @@
    "returns_beyond_100pct": 0,
    "delist_flags": 502
   },
-  "seconds": 304,
+  "seconds": 279,
   "passed": true
  },
  {
@@ -140,7 +140,7 @@
    {
     "name": "V3 costs: Sharpe falls as the spread rises",
     "ok": true,
-    "detail": "+0.56 > +0.16 > -0.65 > -1.86"
+    "detail": "falls at each of 4 spreads (0, 10, 30, 60 bp): by 0.40, 0.81, 1.21"
    },
    {
     "name": "V4 determinism: two runs are identical",
@@ -194,7 +194,7 @@
    "returns_beyond_100pct": 234,
    "delist_flags": 170
   },
-  "seconds": 31,
+  "seconds": 30,
   "passed": true
  },
  {
@@ -234,7 +234,7 @@
    {
     "name": "V3 costs: Sharpe falls as the spread rises",
     "ok": true,
-    "detail": "-0.58 > -0.92 > -1.58 > -2.57"
+    "detail": "falls at each of 4 spreads (0, 10, 30, 60 bp): by 0.33, 0.66, 0.99"
    },
    {
     "name": "V4 determinism: two runs are identical",
@@ -293,7 +293,7 @@
    "returns_beyond_100pct": 150,
    "delist_flags": 372
   },
-  "seconds": 36,
+  "seconds": 29,
   "passed": true
  }
 ]
