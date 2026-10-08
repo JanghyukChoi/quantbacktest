@@ -203,7 +203,48 @@ def test_quota_message_in_a_200_response_stops_cleanly():
     print("U9 the monthly 500-symbol message (HTTP 200) stops the run cleanly and is never stored; an unknown dict still raises  PASS")
 
 
+def _full(api):
+    """The same world with the extra fields of a full download: the open is 1% under the close, the dividend is paid on one day."""
+    out = {}
+    for t, rows in api.items():
+        if rows is None:
+            out[t] = None
+            continue
+        out[t] = [{**r, "open": r["close"] * 0.99, "adjOpen": r["adjClose"] * 0.99, "adjHigh": r["adjClose"] * 1.01, "adjLow": r["adjClose"] * 0.98,
+                   "divCash": 0.5 if i == 30 else 0.0, "splitFactor": 1.0} for i, r in enumerate(rows)]
+    return out
+
+
+def test_full_fields():
+    api, master = _world()
+    fapi = _full(api)
+    with tempfile.TemporaryDirectory(prefix="tiingotest-") as d, tempfile.TemporaryDirectory(prefix="tiingotest-") as d2:
+        tiingo.fetch_symbols(list(fapi), d, caller=Fake(fapi), sleep=0, progress=False, full=True)
+        tiingo.fetch_symbols(list(api), d2, caller=Fake(api), sleep=0, progress=False)
+        pf = tiingo.build_tiingo_panel(d, master, list(fapi), start="2021-01-04", min_names_per_date=10)
+        pp = tiingo.build_tiingo_panel(d2, master, list(api), start="2021-01-04", min_names_per_date=10)
+        assert pp.open is None and pp.meta.get("div_cash") is None                       # a store made without full=True is read as before
+        assert pf.open is not None and pf.high is not None and pf.low is not None
+        assert np.allclose((pf.open / pf.close).stack().dropna(), 0.99)                  # adjOpen is 0.99 x adjClose in this world
+        assert np.array_equal(pf.close.fillna(-1).to_numpy(), pp.close.fillna(-1).to_numpy())     # prices and eligibility are the same either way
+        assert pf.eligible.equals(pp.eligible)
+        dc = pf.meta["div_cash"]
+        assert dc.shape == pf.close.shape and (dc.fillna(0).sum(axis=0) > 0).sum() > 10
+        # a full download that lacks a field is loud and saves nothing
+        bad = {"X": [{k: v for k, v in r.items() if k != "adjOpen"} for r in fapi["S00"]]}
+        with tempfile.TemporaryDirectory(prefix="tiingotest-") as d3:
+            try:
+                tiingo.fetch_symbols(["X"], d3, caller=lambda t, s: bad[t], sleep=0, progress=False, full=True)
+            except RuntimeError as e:
+                assert "adjOpen" in str(e)
+            else:
+                raise AssertionError("a bar without adjOpen must be loud in a full download")
+            assert not list(Path(d3).glob("*"))
+    print("U10 a full download keeps open, high, low and dividends; the panel gets them; a store without them reads as before; a missing field is loud  PASS")
+
+
 if __name__ == "__main__":
+    test_full_fields()
     test_delisting_split_and_penny()
     test_reuse_windows()
     test_resumable_quota_and_none()

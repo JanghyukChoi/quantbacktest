@@ -119,7 +119,7 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
     """The positions that result from asking for `target` row by row (row 0 is a build from cash).
 
     Each day, per name: round the target to whole lots (when `capital` is given; `price` is read on the **same row** as the target, so pass the price of the day the
-    trade is done: `backtest_weights` shifts it by `entry_lag`); skip the trade if its value is under `min_trade_value`;
+    trade is done: `backtest_weights` shifts it by `entry_lag`); skip the trade if its value is under `min_trade_value` (a number, or one per security);
     skip it if it increases the position where `can_buy` is False, or decreases it where `can_sell` is False. A skipped trade leaves the
     position as it was the day before. A name with no price on a day (NaN) keeps its position.
     The weight is what the engines keep constant, so a day without a trade keeps the previous **weight**, not the previous share count: after the price moves, the
@@ -128,6 +128,8 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
     does not free the capital it ties up: the engines still add new targets on top of it."""
     T, N = target.shape
     use_lots = capital is not None
+    mtv = np.asarray(min_trade_value, dtype=float)                       # a number, or one per security
+    mtv_any = bool(np.any(mtv > 0))
     out = np.zeros_like(target, dtype=float)
     prev = np.zeros(N)
     asked = blocked_turn = skipped_turn = gap = stuck = 0.0
@@ -145,8 +147,8 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
             gap += float(np.abs(tgt - target[t]).sum())
         d = tgt - prev
         stay = np.zeros(N, dtype=bool)
-        if min_trade_value > 0 and use_lots:
-            small = (np.abs(d) * capital < min_trade_value) & (d != 0)
+        if use_lots and mtv_any:
+            small = (np.abs(d) * capital < mtv) & (d != 0)
             stay |= small
         blk = np.zeros(N, dtype=bool)
         if can_buy is not None:

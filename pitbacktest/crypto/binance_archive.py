@@ -138,6 +138,33 @@ class ArchiveStore:
         info = json.loads(raw)
         return {s["symbol"] for s in info["symbols"] if s.get("contractType") == "PERPETUAL" and s.get("status") == "TRADING"}
 
+    def symbol_rules(self, refresh: bool = False) -> pd.DataFrame:
+        """Trading rules per contract from the live exchange-info endpoint (no key): quantity step, minimum quantity, minimum order value,
+        price tick, status and the onboard and delivery dates, indexed by symbol. **Today's values only**: the endpoint has no history, so a rule
+        that changed (BTCUSDT's minimum order value is not what it was in 2020) is applied to the past as it is now, and a contract that is no longer
+        listed (delisted ones) is absent. The frame carries the day it was fetched in `.attrs["fetched"]`. Cached as `symbol_rules.json`."""
+        f = self.dir / "symbol_rules.json"
+        if f.exists() and not refresh:
+            blob = json.loads(f.read_text())
+        else:
+            raw = _get(f"{API}/fapi/v1/exchangeInfo")
+            if raw is None:
+                raise RuntimeError("exchange info is not available")
+            rows = {}
+            for s in json.loads(raw)["symbols"]:
+                flt = {x["filterType"]: x for x in s.get("filters", [])}
+                lot, mn, pf = flt.get("LOT_SIZE"), flt.get("MIN_NOTIONAL"), flt.get("PRICE_FILTER")
+                if lot is None or mn is None:
+                    continue
+                rows[s["symbol"]] = {"step_size": float(lot["stepSize"]), "min_qty": float(lot["minQty"]), "min_notional": float(mn["notional"]),
+                                     "tick_size": float(pf["tickSize"]) if pf else float("nan"), "status": s.get("status"),
+                                     "contract_type": s.get("contractType"), "onboard_ms": s.get("onboardDate"), "delivery_ms": s.get("deliveryDate")}
+            blob = {"fetched": pd.Timestamp.now("UTC").strftime("%Y-%m-%d"), "rules": rows}
+            f.write_text(json.dumps(blob))
+        df = pd.DataFrame.from_dict(blob["rules"], orient="index")
+        df.attrs["fetched"] = blob["fetched"]
+        return df
+
     # ------------------------------------------------------------ one symbol
     def _months(self, sym: str, kind: str) -> list[str]:
         keys = _list(f"data/futures/um/monthly/{kind}/{sym}/" + ("1d/" if kind == "klines" else ""))
@@ -240,3 +267,21 @@ def fetch_all(store: ArchiveStore | None = None, symbols: list[str] | None = Non
                 print(f"  {n}/{len(syms)}  {done}", flush=True)
     done["errors"] = errs[:20]
     return done
+
+
+def execution_rules(rules: pd.DataFrame, tickers, *, missing: str = "raise") -> tuple[pd.Series, pd.Series]:
+    """(lot, min_trade_value) per ticker for `backtest_weights(lot=..., min_trade_value=...)`, from `ArchiveStore.symbol_rules()`.
+
+    lot is the quantity step (at least the minimum quantity), in units of the contract; min_trade_value the minimum order value in the quote
+    currency. `rules` holds today's values only and has no delisted contracts. For a ticker it does not know, `missing="raise"` (default) raises,
+    and `missing="nan"` returns NaN for it so that you can leave it out of a small-account run. No substitute rule is invented: a step is in units of
+    the contract, which are worth anything from a thousandth of a dollar to tens of thousands, so there is no safe value to fill in."""
+    if missing not in ("raise", "nan"):
+        raise ValueError(f"missing must be 'raise' or 'nan', not {missing!r}")
+    tickers = pd.Index(tickers)
+    unknown = tickers[~tickers.isin(rules.index)]
+    if len(unknown) and missing == "raise":
+        raise ValueError(f"no trading rules for {len(unknown)} tickers (first: {list(unknown[:3])}); they are probably delisted. "
+                         f"Pass missing='nan' to get NaN for them and leave them out")
+    r = rules.reindex(tickers)
+    return r[["step_size", "min_qty"]].max(axis=1).rename("lot"), r["min_notional"].rename("min_trade_value")

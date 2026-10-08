@@ -100,7 +100,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     then `check_universe=False` is the honest setting. Weights from an optimiser that nets positions are not affected.
     `capital` (money, same currency as `price` and `ImpactModel.aum`), `price` (date x ticker **real** price level on the day of the row, as for the weights:
     a back-adjusted series has an arbitrary level and gives wrong share counts; the engine sizes row t at `price` of day t + `entry_lag`, the day it is traded), `lot` (shares per lot: a number, a Series by ticker or a date x ticker frame) and
-    `min_trade_value` (money) switch on whole-lot sizes; without `capital` they must be left alone.
+    `min_trade_value` (money; a number or a Series by ticker) switch on whole-lot sizes; without `capital` they must be left alone.
     `check_shortable` (only with `panel.shortable`) raises if a short is opened or increased where the security cannot be sold short.
 
     Costs are charged on the **net** trade per security. `backtest_portfolio` charges its long and short legs as separate sleeves,
@@ -133,14 +133,20 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
                              f"(first: {panel.tickers[j]} on {panel.dates[i].date()}); see Panel.shortable")
     bo, so = exec_masks(panel)
     ex = None
-    if capital is None and (price is not None or min_trade_value or (np.ndim(lot) or float(lot) != 1.0)):
+    if isinstance(min_trade_value, pd.Series):
+        mtv = min_trade_value.reindex(panel.tickers).to_numpy(float)
+        if np.isnan(mtv).any():
+            raise ValueError("min_trade_value must be known for every security when it is given per security")
+    else:
+        mtv = float(min_trade_value)
+    if capital is None and (price is not None or np.any(np.asarray(mtv) > 0) or (np.ndim(lot) or float(lot) != 1.0)):
         raise ValueError("price, lot and min_trade_value need capital: whole-lot sizes depend on how much money there is")
     if capital is not None:
         if not (np.isfinite(capital) and capital > 0):
             raise ValueError(f"capital must be a positive number, got {capital!r}")
         if price is None:
             raise ValueError("capital needs price, the real price level in the same currency (not a back-adjusted series)")
-        if not (np.isfinite(min_trade_value) and min_trade_value >= 0):
+        if not (np.all(np.isfinite(mtv)) and np.all(np.asarray(mtv) >= 0)):
             raise ValueError(f"min_trade_value must be at least 0, got {min_trade_value!r}")
         if not isinstance(price, pd.DataFrame):
             raise ValueError("price must be a (date x ticker) frame")
@@ -157,7 +163,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     H_in = H                                                            # what was asked for; `H` becomes what could be held
     if bo is not None or capital is not None:
         H, ex = realize(H, bo, so, capital=capital, price=px if capital is not None else None,
-                        lot=lot_ if capital is not None else 1.0, min_trade_value=float(min_trade_value))
+                        lot=lot_ if capital is not None else 1.0, min_trade_value=mtv)
     fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     cut = len(panel.dates) - (panel.entry_lag + 1)
     gross = (H * fwd).sum(axis=1)
@@ -210,22 +216,23 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
             "impact": None if impact is None else {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window,
                                                    "adv_window": impact.adv_window, "max_cost_bp": impact.max_cost_bp},
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
-            "execution": None if (bo is None and capital is None) else {"blocked": bo is not None, "capital": capital, "min_trade_value": float(min_trade_value)}}
+            "execution": None if (bo is None and capital is None) else {"blocked": bo is not None, "capital": capital,
+                                                                                    "min_trade_value": float(mtv) if np.ndim(mtv) == 0 else "by security"}}
     if ledger is not None:
         from .ledger import array_fingerprint
-        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp", "execution")}, **_side_config(bb, sb), **_exec_config(spec, capital, price, lot),
+        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp", "execution")}, **_side_config(bb, sb), **_exec_config(capital, price, lot, mtv),
                                                     "spread_bp": spread_bp if np.ndim(spread_bp) == 0 else array_fingerprint(spread_bp),
                                                     "weights": array_fingerprint(H_in), "data": panel.fingerprint()})
     return PortfolioResult(spec=spec, metrics=m, benchmark=bench, excess=bexc, yearly={str(k): v for k, v in yr.items()}, grid=None,
                            holdings=H, net_returns=s, benchmark_returns=bret)
 
 
-def _exec_config(spec: dict, capital, price, lot) -> dict:
+def _exec_config(capital, price, lot, mtv) -> dict:
     """Ledger configuration of the execution settings; empty when none is used, so older runs keep their fingerprint."""
     if capital is None:
         return {}
     from .ledger import array_fingerprint
-    return {"capital": float(capital), "min_trade_value": spec["execution"]["min_trade_value"],
+    return {"capital": float(capital), "min_trade_value": float(mtv) if np.ndim(mtv) == 0 else array_fingerprint(np.asarray(mtv)),
             "price": array_fingerprint(price.to_numpy(float)),
             "lot": float(lot) if np.ndim(lot) == 0 else array_fingerprint(np.asarray(lot, dtype=float))}
 

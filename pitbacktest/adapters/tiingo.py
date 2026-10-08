@@ -35,6 +35,8 @@ from ..core.panel import Panel
 
 BASE = "https://api.tiingo.com/tiingo/daily"
 KEEP = ("date", "close", "volume", "adjClose")
+# With `full=True` the open, high, low (adjusted for splits and dividends like adjClose), the dividend paid and the split factor are kept too.
+FULL = KEEP + ("open", "high", "low", "adjOpen", "adjHigh", "adjLow", "divCash", "splitFactor")
 _NOT_PLAIN = re.compile(r"[-.]")
 
 
@@ -106,14 +108,14 @@ def _call(ticker: str, start: str, key: str, retries: int = 3):
     return None
 
 
-def _check(ticker: str, rows) -> list[dict]:
+def _check(ticker: str, rows, fields=KEEP) -> list[dict]:
     if not isinstance(rows, list):
         raise RuntimeError(f"Tiingo {ticker}: unexpected response type {type(rows).__name__}")
     out = []
     for r in rows:
-        if not all(k in r for k in KEEP):
-            raise RuntimeError(f"Tiingo {ticker}: bar without {[k for k in KEEP if k not in r]}; the format changed")
-        out.append({"date": str(r["date"])[:10], "close": r["close"], "volume": r["volume"], "adjClose": r["adjClose"]})
+        if not all(k in r for k in fields):
+            raise RuntimeError(f"Tiingo {ticker}: bar without {[k for k in fields if k not in r]}; the format changed")
+        out.append({k: (str(r[k])[:10] if k == "date" else r[k]) for k in fields})
     return out
 
 
@@ -122,9 +124,10 @@ def _safe(ticker: str) -> str:
 
 
 def fetch_symbols(tickers, store_dir, *, start: str = "2012-01-01", key: str | None = None, sleep: float = 0.3,
-                  max_new: int | None = None, caller=None, progress: bool = True) -> dict:
+                  max_new: int | None = None, caller=None, progress: bool = True, full: bool = False) -> dict:
     """Download one file per ticker into `store_dir` (`T.json` with the needed fields, or `T.none` if the API has nothing).
     Resumable: tickers already stored are skipped. `max_new` limits requests in this run. Stops cleanly on a quota error.
+    `full=True` keeps the open, high, low, dividend and split factor as well (use a different `store_dir` from a store made without it).
     `caller(ticker, start)` can be injected for tests (return None for an unknown ticker)."""
     store = Path(store_dir).expanduser()
     store.mkdir(parents=True, exist_ok=True)
@@ -150,7 +153,7 @@ def fetch_symbols(tickers, store_dir, *, start: str = "2012-01-01", key: str | N
             n.write_text("")
             done["none"] += 1
         else:
-            f.write_text(json.dumps(_check(t, rows)))        # validated first: a malformed answer is never saved
+            f.write_text(json.dumps(_check(t, rows, FULL if full else KEEP)))        # validated first: a malformed answer is never saved
             done["fetched"] += 1
         if progress and done["calls"] % 25 == 0:
             print(f"  {done['calls']} requests, {done['fetched']} with data, {done['none']} none", flush=True)
@@ -170,7 +173,7 @@ def build_tiingo_panel(store_dir, master: pd.DataFrame, tickers, *, start: str =
     security counts bars from the start of the stored data (`fetch_symbols(start=...)`), so a warm-up year of 60+ bars
     makes that irrelevant for the study period."""
     store = Path(store_dir).expanduser()
-    adj, raw, vol, meta = {}, {}, {}, {"tickers_with_data": 0, "tickers_none": 0, "tickers_missing": 0, "windows_cut": 0}
+    adj, raw, vol, oh, div, meta = {}, {}, {}, {"adjOpen": {}, "adjHigh": {}, "adjLow": {}}, {}, {"tickers_with_data": 0, "tickers_none": 0, "tickers_missing": 0, "windows_cut": 0}
     for t in map(str, tickers):
         f, n = store / f"{_safe(t)}.json", store / f"{_safe(t)}.none"
         if n.exists():
@@ -198,6 +201,10 @@ def build_tiingo_panel(store_dir, master: pd.DataFrame, tickers, *, start: str =
                 continue
             sid = f"{t}@{w['start']:%Y%m%d}" if multi else t
             adj[sid], raw[sid], vol[sid] = b["adjClose"], b["close"], b["volume"]
+            if "adjOpen" in b.columns:                                  # a store made with full=True
+                for k in oh:
+                    oh[k][sid] = b[k]
+                div[sid] = b["divCash"]
     if not adj:
         raise ValueError("no usable securities in the store")
     A, R, V = pd.DataFrame(adj), pd.DataFrame(raw), pd.DataFrame(vol)
@@ -217,8 +224,13 @@ def build_tiingo_panel(store_dir, master: pd.DataFrame, tickers, *, start: str =
         if last[c] is not None and last[c] < last_date - pd.Timedelta(days=end_gap_days):
             da.loc[last[c], c] = True
     r = A.pct_change(fill_method=None)
+    extra = {}
+    if oh["adjOpen"]:
+        O, Hh, Ll = (pd.DataFrame(oh[k]).reindex(index=cal, columns=A.columns) for k in ("adjOpen", "adjHigh", "adjLow"))
+        extra = {"open": O, "high": Hh, "low": Ll}
+        meta["div_cash"] = pd.DataFrame(div).reindex(index=cal, columns=A.columns).astype("float32")   # dollars per share paid that day (raw prices)
     meta["suspect_returns_gt_10x"] = int((r.abs() > 10).sum().sum())
     meta["securities"] = int(A.shape[1])
     meta["raw_close"] = R.astype("float32")                      # the real price level (dollars), for whole-share sizes; `close` is adjusted
     return Panel(close=A, eligible=elig, volume=dvol / A, market="US", entry_lag=entry_lag, periods_per_year=252,
-                 delist_after=da, meta=meta)
+                 delist_after=da, meta=meta, **extra)
