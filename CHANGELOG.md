@@ -44,6 +44,12 @@
   `min_trade_value` for whole-lot sizes. New metrics: `blocked_trades`, `blocked_turnover_share`, `mean_stuck_weight`, `longest_freeze_days`, `min_trade_skipped`,
   `mean_abs_rounding_gap`. The KRX and Tiingo panels record the real price level in `meta["raw_close"]`. No limit, lot size or minimum order ships with the library.
   Found by running it on real data: refusing the exit from a delisted name froze a large part of one real short leg for ever, and a Binance contract absent for years and then listed again kept a position alive.
+- **Binance trading rules.** `ArchiveStore.symbol_rules()` reads the quantity step, minimum quantity and minimum order value of each contract from the exchange-info
+  endpoint (no key; today's values only, delisted contracts absent) and `execution_rules()` turns them into `lot` and `min_trade_value` for `backtest_weights`, which now
+  takes `min_trade_value` per ticker. An unknown ticker raises or is NaN: no rule is invented.
+- **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
+  and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
+  did not hit the monthly limit.
 - **Changed**: `backtest_weights(check_universe=True)` now looks at long and short exposure separately, so turning a long into a smaller short in a name that is
   not eligible raises (it used to pass because the absolute weight shrank).
 - **Fixed (second independent review)**: `inject_delistings(hazard="illiquid")` raised `IndexError` on any panel whose first calendar year had 100 or more bars
