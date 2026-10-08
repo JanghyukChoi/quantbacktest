@@ -173,6 +173,36 @@ def test_calendar():
         print("U8 a date with too few bars is not a trading day  PASS")
 
 
+def test_quota_message_in_a_200_response_stops_cleanly():
+    """The monthly symbol limit arrives as HTTP 200 with a `detail` message (seen on a free account); it must stop the run like a 429,
+    not be mistaken for a format change, and a dict that is not a quota message must still raise."""
+    class R:
+        def __init__(self, b): self.b = b
+        def read(self): return self.b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    import json as _json
+    real = tiingo.urllib.request.urlopen
+    msg = {"detail": "You have run over your 500 symbol look up for this month. Please upgrade at https://api.tiingo.com/pricing"}
+    try:
+        tiingo.urllib.request.urlopen = lambda req, timeout=0: R(_json.dumps(msg).encode())
+        with tempfile.TemporaryDirectory(prefix="tiingotest-") as d:
+            r = tiingo.fetch_symbols(["AAA", "BBB"], d, key="k", sleep=0, progress=False)
+            assert r["stopped"].startswith("quota") and "500 symbol" in r["stopped"] and r["calls"] == 0, r
+            assert not list(Path(d).glob("*")), "a quota message must not be stored as data"
+        tiingo.urllib.request.urlopen = lambda req, timeout=0: R(_json.dumps({"detail": "Something else is wrong"}).encode())
+        with tempfile.TemporaryDirectory(prefix="tiingotest-") as d:
+            try:
+                tiingo.fetch_symbols(["AAA"], d, key="k", sleep=0, progress=False)
+            except RuntimeError as e:
+                assert "unexpected response" in str(e)
+            else:
+                raise AssertionError("an unknown dict must still be loud")
+    finally:
+        tiingo.urllib.request.urlopen = real
+    print("U9 the monthly 500-symbol message (HTTP 200) stops the run cleanly and is never stored; an unknown dict still raises  PASS")
+
+
 if __name__ == "__main__":
     test_delisting_split_and_penny()
     test_reuse_windows()
@@ -181,4 +211,5 @@ if __name__ == "__main__":
     test_sample_and_frame()
     test_malformed_is_loud()
     test_calendar()
+    test_quota_message_in_a_200_response_stops_cleanly()
     print("tiingo tests: all passed")

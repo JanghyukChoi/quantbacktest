@@ -81,7 +81,11 @@ def _call(ticker: str, start: str, key: str, retries: int = 3):
     for i in range(retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
-                return json.loads(r.read())
+                data = json.loads(r.read())
+            # The monthly limit on distinct symbols (500 on a free account) comes back as HTTP 200 with a message, not as a 429.
+            if isinstance(data, dict) and re.search(r"run over|allocation|look ?up|upgrade", str(data.get("detail", "")), re.I):
+                raise QuotaExceeded(f"HTTP 200: {data.get('detail')}")
+            return data
         except urllib.error.HTTPError as e:
             body = e.read()[:300].decode("utf-8", "replace")
             if e.code == 429:
