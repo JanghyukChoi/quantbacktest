@@ -45,6 +45,16 @@ at long gaps, as the KRX adapter does.
 
 I did not check how many requests the free tier allows in total; the probe stops at the first HTTP 429.
 
+## A US measurement from free data (lower bound)
+
+`studies/us_survivorship` runs four factors on a random sample of 466 US-listed tickers (2013 to 2026), once with the securities delisted since
+(from the free Tiingo account above) and once with survivors only. All 16 differences in net Sharpe lie between -0.07 and +0.04 and every 95% interval
+(about 0.29 wide) includes zero, so nothing smaller than roughly 0.15 can be seen. **That does not show the bias is small:** only 9% of the
+delisted securities in the sample fell by more than half in their last year, because the free data holds almost no bankruptcies. A scenario that puts
+distress delistings back at 1 to 3% a year (an assumption, not a measurement) moves the survivors-only result by up to about 0.17 Sharpe, upward for
+some factors and downward for others. The sample reached 466 of the planned 500 tickers before the free tier's monthly limit; the extension is planned
+for November (`AMENDMENT_1.md` in the study).
+
 ## What `pitbacktest` does about it
 
 - `Panel.audit()` reports `ended_before_end_share` and `survivorship_suspected`. In a real market a few percent of
