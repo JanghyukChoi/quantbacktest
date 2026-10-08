@@ -120,12 +120,14 @@ class Panel:
         return (exit_ / entry - 1.0).astype(np.float32)
 
     def fingerprint(self) -> str:
-        """Short hash of the data this panel holds (prices, eligibility, funding, delisting flags), used by the trial
-        ledger to tell whether two runs saw the same data."""
+        """Short hash of the numbers this panel holds (every matrix that is present, including volume and market cap, which
+        the impact model and the size controls read), used by the trial ledger to tell whether two runs saw the same data.
+        The date index and the ticker names are not hashed: the same values in the same shape give the same fingerprint."""
         import hashlib
         h = hashlib.sha256()
-        for name in ("close", "eligible", "funding", "delist_after"):
-            v = getattr(self, name)
+        mats = [(n, getattr(self, n)) for n in ("close", "eligible", "open", "high", "low", "volume", "mkt_cap", "funding", "delist_after")]
+        mats += [(f"chars.{k}", self.chars[k]) for k in sorted(self.chars)]
+        for name, v in mats:
             if v is not None:
                 a = np.ascontiguousarray(v.to_numpy(dtype=np.float32))
                 h.update(name.encode() + repr(a.shape).encode() + a.tobytes())

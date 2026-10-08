@@ -14,7 +14,7 @@ Principles
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -83,6 +83,11 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
         raise ValueError(f"primary_h={primary_h} must be one of horizons {tuple(horizons)}")
     if not (cost_bp >= 0 and np.isfinite(cost_bp)):
         raise ValueError(f"cost_bp must be finite and not negative, got {cost_bp!r}")
+    if not (0 < fire_q <= 1):
+        raise ValueError(f"fire_q must be in (0, 1], got {fire_q!r}")
+    for fname, fv in factors.items():
+        if isinstance(fv, pd.DataFrame) and len(fv.columns) and (fv.dtypes == bool).all():
+            raise ValueError(f"factor {fname!r} is boolean: screen ranks a numeric score, use backtest_event for a yes/no signal")
     fwd = {h: panel.forward(h, delist_return) for h in horizons}
     cums = {h: fwd[h].values.astype(np.float64) for h in horizons}
 
@@ -93,7 +98,8 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     thr = null.get("p95", np.nan)
     if not np.isfinite(thr):
         thr = 3.0
-    cfg = gate_config or GateConfig(null_threshold=thr)
+    cfg = GateConfig(null_threshold=thr) if gate_config is None else (
+        gate_config if gate_config.null_threshold is not None else replace(gate_config, null_threshold=thr))
 
     rows, detail = [], {}
     for name, raw in factors.items():

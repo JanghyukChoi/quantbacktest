@@ -26,6 +26,10 @@
 - **Fixed**: the README, the `screen` docstring and the package docstring said `screen` reports post-control results only. Only `t` and `neu_*` are
   computed with controls; `excess_bp`, `net_bp` and `rho` come from the uncontrolled top-decile firing. The wording is corrected everywhere, and the
   `Panel.forward` docstring (which described a log accumulation that never existed) is rewritten.
+- **Fixed (second independent review)**: `inject_delistings(hazard="illiquid")` raised `IndexError` on any panel whose first calendar year had 100 or more bars
+  (there is nothing earlier to tilt on), and `hazard="volatile"` silently became uniform there; the first year is now drawn uniformly. `Panel.fingerprint` left out
+  `volume`, `mkt_cap`, `open`, `high`, `low` and `chars`, so two impact-model runs that differed only in volume counted as one trial; they are now hashed.
+  `screen` ignored the shuffled-null threshold when given a `GateConfig()` with `null_threshold=None` (it used 3.0), and accepted `fire_q` outside (0, 1] and boolean factors; it now fills the measured threshold and rejects both.
 - **Fixed**: an intraday backtest accepted `entry_lag=0` through a hand-built panel or `latency_sweep(lags=(0, ...))`; a scalar NaN cost passed the cost check and
   produced NaN metrics; `inject_delistings` checked `hazard` only when it drew a name, and `hazard="illiquid"` without volume silently became uniform;
   on a panel shorter than a year the 12-1 momentum control was NaN everywhere and every date dropped out of the regressions (it is now left out with a warning).

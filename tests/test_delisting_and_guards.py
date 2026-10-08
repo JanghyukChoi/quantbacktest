@@ -86,6 +86,18 @@ def test_guards():
     _raises(lambda: inject_delistings(base, hazard="bogus", annual_rate=0.0001), "hazard")                # even when no name would be drawn
     _raises(lambda: inject_delistings(replace(base, volume=None), hazard="illiquid"), "volume")
     _raises(lambda: inject_delistings(base, annual_rate=1.5), "annual_rate")
+    for hz in ("illiquid", "volatile"):                                                                   # first calendar year has nothing earlier to tilt on
+        first_year = inject_delistings(base, hazard=hz, annual_rate=0.05, seed=1)
+        assert first_year.delist_after.to_numpy().sum() > 0, hz
+    pf = base
+    ff = -pf.close.pct_change(5)
+    for bad in (0.0, -0.1, 2.0):
+        _raises(lambda: q.screen(pf, {"a": ff}, horizons=(5,), primary_h=5, n_null=10, fire_q=bad), "fire_q")
+    _raises(lambda: q.screen(pf, {"a": ff > 0}, horizons=(5,), primary_h=5, n_null=10), "boolean")
+    from pitbacktest import GateConfig
+    sc = q.screen(pf, {"a": ff}, horizons=(5,), primary_h=5, n_null=10, gate_config=GateConfig(), neutralize_all=False)
+    s0 = q.screen(pf, {"a": ff}, horizons=(5,), primary_h=5, n_null=10, neutralize_all=False)
+    assert sc.summary.equals(s0.summary) and sc.funnel == s0.funnel       # a default GateConfig() changes nothing: the measured null reaches it
     short, _ = make_panel(n_days=200, n_stocks=60)
     with warnings.catch_warnings(record=True) as w_:
         warnings.simplefilter("always")

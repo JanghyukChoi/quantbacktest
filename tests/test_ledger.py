@@ -79,7 +79,20 @@ def test_ledger_does_not_change_results():
         print("L4 recording does not change the numbers  PASS")
 
 
+def test_fingerprint_covers_volume_and_market_cap():
+    from dataclasses import replace
+    p = _panel()[0] if isinstance(_panel(), tuple) else _panel()
+    vol = p.close * 1000.0
+    a = replace(p, volume=vol, mkt_cap=p.close * 1e6)
+    assert a.fingerprint() == replace(p, volume=vol.copy(), mkt_cap=p.close * 1e6).fingerprint()
+    assert a.fingerprint() != replace(a, volume=vol * 100).fingerprint()        # the impact model reads volume
+    assert a.fingerprint() != replace(a, mkt_cap=p.close * 2e6).fingerprint()
+    assert a.fingerprint() != p.fingerprint()
+    print("L5 the data fingerprint changes when volume or market cap changes  PASS")
+
+
 if __name__ == "__main__":
+    test_fingerprint_covers_volume_and_market_cap()
     test_counts_distinct_configs_only()
     test_dsr_uses_ledger_count_not_columns()
     test_chain_detects_edit_and_deletion()

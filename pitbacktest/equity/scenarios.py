@@ -24,6 +24,8 @@ def _weights(panel: Panel, year_start: pd.Timestamp, names: pd.Index, hazard: st
     if hazard == "uniform":
         return np.ones(len(names))
     before = panel.dates < year_start
+    if not before.any():
+        return np.ones(len(names))                                 # first year: nothing earlier to tilt on, so uniform
     if hazard == "volatile":
         v = panel.close.pct_change(fill_method=None).loc[before].tail(60).std().reindex(names)
     elif hazard == "illiquid":
