@@ -78,6 +78,93 @@ def tradability(panel: Panel, *, limit=None, tol: float = 0.01, halt_on_zero_vol
     return can_buy, can_sell
 
 
+def halt_runs(panel: Panel) -> np.ndarray:
+    """(date x ticker) int: how many consecutive days, counting the day itself, the security has had a price but no (or unknown) volume; 0 on a day it trades or has no price.
+    A panel without `volume` has none."""
+    c = panel.close
+    if panel.volume is None:
+        return np.zeros(c.shape, dtype=int)
+    halted = (c.notna() & ~(panel.volume.fillna(0.0) > 0)).to_numpy()
+    run = np.zeros(c.shape, dtype=int)
+    for t in range(c.shape[0]):
+        run[t] = np.where(halted[t], (run[t - 1] if t else 0) + 1, 0)
+    return run
+
+
+def freeze_hits(panel: Panel, freeze_days: int | None) -> np.ndarray | None:
+    """(date x ticker) bool indexed by the **signal date**: True where the execution day (signal date + `entry_lag`) is exactly the `freeze_days`-th day of a suspension.
+    None when `freeze_days` is None. A suspension marks a position down once, on the day it reaches that length, and not again however long it lasts."""
+    if freeze_days is None:
+        return None
+    if isinstance(freeze_days, bool) or not isinstance(freeze_days, (int, np.integer)) or freeze_days < 1:
+        raise ValueError(f"freeze_days must be a whole number of days, at least 1, or None, got {freeze_days!r}")
+    hit = halt_runs(panel) == freeze_days
+    lag = panel.entry_lag
+    return np.vstack([hit[lag:], np.zeros((lag, hit.shape[1]), bool)]) if lag else hit
+
+
+def check_freeze_return(freeze_return: float) -> float:
+    if not (np.isfinite(freeze_return) and -1.0 <= freeze_return <= 0.0):
+        raise ValueError(f"freeze_return must be between -1 and 0 (a markdown is never a gain), got {freeze_return!r}")
+    return float(freeze_return)
+
+
+def freeze_episodes(panel: Panel, *, min_days: int = 20, relist_days: int = 20) -> pd.DataFrame:
+    """The stretches of at least `min_days` consecutive days on which a security had a price but no volume (a trading suspension), and how each ended.
+
+    One row per episode: ticker, start, end (the last suspended day), days, outcome and `ret`, the return from the last price before the suspension
+    to the price at the end of the story.
+    outcome  "resumed"               trading came back and the data goes on for more than `relist_days` trading days: ret is the price on the first
+                                      day of trading again over the price before the suspension
+             "resumed_then_delisted"  trading came back, but the security's last bar is within `relist_days` of that day (a liquidation window):
+                                      ret is its last price over the price before
+             "ended_in_halt"          the security's last bar is a suspended day (flagged in `delist_after`): the price never moved, ret is 0, and
+                                      the loss, if any, was never in the data
+             "ongoing"                still suspended on the last day of the panel; ret is NaN
+    The point is to measure how often a position that cannot be sold is lost, instead of assuming it. Counts are small and depend on the market and
+    the period; read the distribution of `ret`, not a mean."""
+    c = panel.close
+    halted = (c.notna() & ~(panel.volume.fillna(0.0) > 0)).to_numpy() if panel.volume is not None else np.zeros(c.shape, bool)
+    px = c.to_numpy(float)
+    da = panel.delist_after.reindex(index=c.index, columns=c.columns).fillna(False).to_numpy(bool) if panel.delist_after is not None else np.zeros(c.shape, bool)
+    T, N = c.shape
+    rows = []
+    for j in range(N):
+        h = halted[:, j]
+        if not h.any():
+            continue
+        t = 0
+        valid = np.where(~np.isnan(px[:, j]))[0]
+        last_bar = int(valid[-1]) if len(valid) else -1
+        flagged = bool(da[:, j].any())
+        while t < T:
+            if not h[t]:
+                t += 1
+                continue
+            e = t
+            while e + 1 < T and h[e + 1]:
+                e += 1
+            if e - t + 1 >= min_days:
+                before = next((px[k, j] for k in range(t - 1, -1, -1) if not np.isnan(px[k, j]) and not h[k]), np.nan)
+                if e == T - 1 and not (flagged and last_bar == e):
+                    outcome, ret = "ongoing", np.nan
+                elif flagged and last_bar == e:
+                    outcome, ret = "ended_in_halt", 0.0 if np.isfinite(before) else np.nan
+                else:
+                    nxt = e + 1
+                    while nxt < T and np.isnan(px[nxt, j]):
+                        nxt += 1
+                    if nxt >= T:
+                        outcome, ret = "ongoing", np.nan
+                    elif flagged and last_bar - nxt <= relist_days:
+                        outcome, ret = "resumed_then_delisted", px[last_bar, j] / before - 1.0 if np.isfinite(before) else np.nan
+                    else:
+                        outcome, ret = "resumed", px[nxt, j] / before - 1.0 if np.isfinite(before) else np.nan
+                rows.append({"ticker": c.columns[j], "start": c.index[t], "end": c.index[e], "days": e - t + 1, "outcome": outcome, "ret": ret})
+            t = e + 1
+    return pd.DataFrame(rows, columns=["ticker", "start", "end", "days", "outcome", "ret"])
+
+
 def at_prices(panel: Panel, price="open") -> Panel:
     """A copy of `panel` whose prices are another series, so that a position is entered and marked at it. `price` is the name of a panel
     field (`"open"`, `"high"`, `"low"`) or a (date x ticker) frame. With the open, a signal from the close of day d is entered at the open
@@ -115,7 +202,7 @@ def round_to_lots(weights: np.ndarray, capital: float, price: np.ndarray, lot) -
 
 
 def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.ndarray | None = None, *,
-            capital: float | None = None, price: np.ndarray | None = None, lot=1.0, min_trade_value: float = 0.0):
+            capital: float | None = None, price: np.ndarray | None = None, lot=1.0, min_trade_value: float = 0.0, cap_gross: bool = False):
     """The positions that result from asking for `target` row by row (row 0 is a build from cash).
 
     Each day, per name: round the target to whole lots (when `capital` is given; `price` is read on the **same row** as the target, so pass the price of the day the
@@ -123,38 +210,76 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
     skip it if it increases the position where `can_buy` is False, or decreases it where `can_sell` is False. A skipped trade leaves the
     position as it was the day before. A name with no price on a day (NaN) keeps its position.
     The weight is what the engines keep constant, so a day without a trade keeps the previous **weight**, not the previous share count: after the price moves, the
-    shares it implies need not be a multiple of the lot (a halted name does not move, so there it is). Returns (positions, stats). `mean_stuck_weight` is the average over days of the weight held where the target said otherwise because a trade was
-    blocked; `longest_freeze_days` the longest run of consecutive days a wanted trade in one name was blocked. A position that cannot be traded
-    does not free the capital it ties up: the engines still add new targets on top of it."""
+    shares it implies need not be a multiple of the lot (a halted name does not move, so there it is).
+
+    `cap_gross`: a position that cannot be traded ties up capital. Without this, new targets are added on top of it and the gross exposure can exceed the
+    target's. With it, the day's whole target is scaled by the largest k in [0, 1] for which the resulting gross exposure does not exceed the target's gross
+    (found by bisection; the stuck positions do not move, so in effect the free names shrink). A scaled target can turn a buy into a sell, which changes what is
+    blocked, so k is searched for rather than solved for. On a day with nothing blocked k is exactly 1 and the result is the same as without it. If the stuck
+    positions alone exceed the target gross, nothing can meet the cap: k is 0 and the day is counted in `infeasible_days`.
+
+    Returns (positions, stats). `mean_stuck_weight` is the average over days of the weight held where the target said otherwise because a trade was
+    blocked; `longest_freeze_days` the longest run of consecutive days a wanted trade in one name was blocked; `mean_free_scale` the average k (1 without `cap_gross`), `infeasible_days` the days on which the stuck positions alone exceeded the target gross."""
     T, N = target.shape
     use_lots = capital is not None
     mtv = np.asarray(min_trade_value, dtype=float)                       # a number, or one per security
     mtv_any = bool(np.any(mtv > 0))
     out = np.zeros_like(target, dtype=float)
     prev = np.zeros(N)
-    asked = blocked_turn = skipped_turn = gap = stuck = 0.0
-    n_blocked = n_skipped = 0
+    asked = blocked_turn = skipped_turn = gap = stuck = k_sum = 0.0
+    n_blocked = n_skipped = infeasible = 0
     streak = np.zeros(N, dtype=int)
     longest = 0
-    for t in range(T):
-        tgt = target[t]
+
+    def decide(raw: np.ndarray, t: int):
+        tgt = raw
         if use_lots:
             lt = lot[t] if isinstance(lot, np.ndarray) and lot.ndim == 2 else lot
-            tgt = round_to_lots(tgt, capital, price[t], lt)
+            tgt = round_to_lots(raw, capital, price[t], lt)
             # A flat target needs no price to carry out (a delisted name is simply closed); a non-flat target with no price cannot be sized, so the
             # position stays.
-            tgt = np.where(target[t] == 0, 0.0, np.where(np.isfinite(tgt), tgt, prev))
-            gap += float(np.abs(tgt - target[t]).sum())
+            tgt = np.where(raw == 0, 0.0, np.where(np.isfinite(tgt), tgt, prev))
         d = tgt - prev
         stay = np.zeros(N, dtype=bool)
         if use_lots and mtv_any:
-            small = (np.abs(d) * capital < mtv) & (d != 0)
-            stay |= small
+            stay |= (np.abs(d) * capital < mtv) & (d != 0)
         blk = np.zeros(N, dtype=bool)
         if can_buy is not None:
             blk |= (d > 0) & ~can_buy[t]
         if can_sell is not None:
             blk |= (d < 0) & ~can_sell[t]
+        return tgt, d, stay, blk
+
+    for t in range(T):
+        raw0 = target[t]
+        k = 1.0
+        tgt, d, stay, blk = decide(raw0, t)
+        if cap_gross:
+            budget = float(np.abs(raw0).sum()) + 1e-12
+
+            def gross_at(kk: float) -> float:
+                g_tgt, _, g_stay, g_blk = decide(raw0 * kk, t)
+                return float(np.abs(np.where(g_stay | g_blk, prev, g_tgt)).sum())
+
+            if float(np.abs(np.where(stay | blk, prev, tgt)).sum()) > budget:
+                if gross_at(0.0) > budget:
+                    k = 0.0
+                    infeasible += 1
+                else:
+                    lo, hi = 0.0, 1.0                                       # lo is always feasible, hi is not
+                    while hi - lo > 1e-14:
+                        mid = 0.5 * (lo + hi)
+                        lo, hi = (mid, hi) if gross_at(mid) <= budget else (lo, mid)
+                    k = lo
+                raw = raw0 * k
+                tgt, d, stay, blk = decide(raw, t)
+            else:
+                raw = raw0
+        else:
+            raw = raw0
+        k_sum += k
+        if use_lots:
+            gap += float(np.abs(tgt - raw).sum())
         cur = np.where(stay | blk, prev, tgt)
         held = blk & ~stay
         stuck += float(np.abs(cur - tgt)[held].sum())                         # weight sitting where it should not be, today
@@ -170,5 +295,5 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
         prev = cur
     stats = {"mean_stuck_weight": stuck / T if T else 0.0, "longest_freeze_days": longest, "asked_turnover": asked, "blocked_turnover": blocked_turn, "blocked_trades": n_blocked, "blocked_turnover_share": blocked_turn / asked if asked > 0 else 0.0,
              "min_trade_skipped": n_skipped, "min_trade_skipped_share": skipped_turn / asked if asked > 0 else 0.0,
-             "mean_abs_rounding_gap": gap / (T * N) if use_lots else 0.0}
+             "mean_abs_rounding_gap": gap / (T * N) if use_lots else 0.0, "mean_free_scale": k_sum / T if T else 1.0, "infeasible_days": infeasible}
     return out, stats

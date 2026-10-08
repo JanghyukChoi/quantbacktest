@@ -10,6 +10,8 @@ X5 lots        positions are whole lots at the real price; a loop gives the same
 X6 minimum     trades under the minimum value are skipped and counted; a high minimum leaves the book unchanged
 X7 prices      `at_prices` enters and marks at the open: the result equals the engine run on a panel built from the open by hand
 X8 checks      lots without capital, capital without price, a bad lot and a bad limit raise
+X4d freeze markdown  a suspended long is marked down once on the K-th suspended day; shorts and unheld names are not touched
+X4e gross cap       blocked positions tie up capital: the free names are scaled so that the gross stays at the target's
 X9 ledger      execution settings are a different trial; a run without them keeps its configuration
 """
 from __future__ import annotations
@@ -170,6 +172,155 @@ def test_delisted_positions_are_not_frozen():
     assert np.allclose(r.holdings, free.holdings), "nothing but delisted names could be blocked here"
     assert r.metrics["blocked_turnover_share"] < 1e-9, r.metrics["blocked_turnover_share"]
     print("X4b a long or a short in a delisted name is closed after the last bar instead of being frozen (the case the first real-data run exposed)  PASS")
+
+
+def test_freeze_episodes():
+    p, _ = _setup(seed=31, T=260, N=12)
+    c = p.close.copy(); v = pd.DataFrame(1000.0, index=p.dates, columns=p.tickers)
+    da = pd.DataFrame(False, index=p.dates, columns=p.tickers)
+    k = p.tickers
+    base = lambda j, r: float(c.iloc[r - 1, j])                      # the last price before a suspension that starts on row r
+    # 0: suspended rows 50..79 (30 days), then trades again for good: resumed
+    v.iloc[50:80, 0] = 0.0; c.iloc[50:80, 0] = base(0, 50); c.iloc[80, 0] = base(0, 50) * 1.25
+    # 1: suspended rows 60..89, trades again on 90 and is delisted on row 100 (a liquidation window) at 0.2 of the price before
+    v.iloc[60:90, 1] = 0.0; c.iloc[60:90, 1] = base(1, 60); c.iloc[90:101, 1] = np.linspace(base(1, 60) * 0.8, base(1, 60) * 0.2, 11); c.iloc[101:, 1] = np.nan; da.iloc[100, 1] = True
+    # 2: suspended from row 70 to its last bar (row 140), delisted while suspended
+    v.iloc[70:141, 2] = 0.0; c.iloc[70:141, 2] = base(2, 70); c.iloc[141:, 2] = np.nan; da.iloc[140, 2] = True
+    # 3: suspended from row 200 to the end of the panel
+    v.iloc[200:, 3] = 0.0; c.iloc[200:, 3] = base(3, 200)
+    # 4: a suspension of only 10 days: not an episode at min_days=20
+    v.iloc[40:50, 4] = 0.0; c.iloc[40:50, 4] = base(4, 40)
+    # 5: two suspensions of 25 days each
+    v.iloc[20:45, 5] = 0.0; c.iloc[20:45, 5] = base(5, 20); v.iloc[100:125, 5] = 0.0; c.iloc[100:125, 5] = float(c.iloc[99, 5])
+    # 6: suspended exactly 20 days (counts at min_days=20), 7: 19 days (does not)
+    v.iloc[150:170, 6] = 0.0; c.iloc[150:170, 6] = base(6, 150)
+    v.iloc[150:169, 7] = 0.0; c.iloc[150:169, 7] = base(7, 150)
+    pp = replace(p, close=c, volume=v, delist_after=da)
+    e = ex.freeze_episodes(pp, min_days=20).set_index(["ticker", "start"])
+    got = {(t, s_.date().isoformat()): (r.outcome, r.days, r.ret) for (t, s_), r in e.iterrows()}
+    d = lambda r: p.dates[r].date().isoformat()
+    assert got[(k[0], d(50))][0] == "resumed" and got[(k[0], d(50))][1] == 30 and abs(got[(k[0], d(50))][2] - 0.25) < 1e-12, got
+    r1 = got[(k[1], d(60))]
+    assert r1[0] == "resumed_then_delisted" and r1[1] == 30 and abs(r1[2] - (-0.8)) < 1e-12, r1
+    r2 = got[(k[2], d(70))]
+    assert r2[0] == "ended_in_halt" and r2[1] == 71 and r2[2] == 0.0, r2
+    r3 = got[(k[3], d(200))]
+    assert r3[0] == "ongoing" and np.isnan(r3[2]), r3
+    assert not any(t == k[4] for t, _ in got), "a 10 day suspension is not an episode"
+    assert sum(1 for t, _ in got if t == k[5]) == 2 and got[(k[5], d(100))][0] == "resumed"
+    assert (k[6], d(150)) in got and got[(k[6], d(150))][1] == 20 and not any(t == k[7] for t, _ in got)      # exactly min_days counts, one day less does not
+    assert len(got) == 7, len(got)                                                                   # names 0, 1, 2, 3 and 6 once and name 5 twice
+    assert len(ex.freeze_episodes(pp, min_days=5)) == 9                                              # the 10 day suspension appears at a lower threshold
+    assert ex.freeze_episodes(replace(pp, volume=None)).empty                                        # no volume, no suspension to see
+    print("X4c suspension episodes: the outcome and the return of each case equal a hand count (resumed, resumed then delisted, ended in halt, ongoing, too short, repeated)  PASS")
+
+
+def test_freeze_markdown():
+    # A long position in a security that has been suspended for K days is marked down once, on the K-th suspended day; shorts and unheld names are not touched.
+    for lag in (0, 1, 2):
+        p, _ = _setup(seed=40 + lag, T=300, N=15)                                   # long enough that annualised figures exist
+        p = replace(p, entry_lag=lag)
+        v = pd.DataFrame(1000.0, index=p.dates, columns=p.tickers)
+        c = p.close.copy()
+        R, K = 50, 10                                                                # suspended on execution days 50..79; the 10th suspended day is row 59
+        v.iloc[R:R + 30, 0] = 0.0; c.iloc[R:R + 30, 0] = float(c.iloc[R - 1, 0])
+        v.iloc[R:R + 30, 1] = 0.0; c.iloc[R:R + 30, 1] = float(c.iloc[R - 1, 1])      # name 1 is suspended too: short in the book
+        v.iloc[R:R + 30, 2] = 0.0; c.iloc[R:R + 30, 2] = float(c.iloc[R - 1, 2])      # name 2 is suspended and not held
+        pp = replace(p, close=c, volume=v)
+        W = pd.DataFrame(0.0, index=p.dates, columns=p.tickers); W.iloc[:, 0] = 0.10; W.iloc[:, 1] = -0.05; W.iloc[:, 5] = 0.2
+        kw = dict(benchmark=None, check_universe=False)
+        base = q.backtest_weights(pp, W, **kw)
+        fr = q.backtest_weights(pp, W, freeze_days=K, freeze_return=-0.4, **kw)
+        diff = (fr.net_returns - base.net_returns).to_numpy()
+        row = R + K - 1 - lag                                                        # the signal row whose execution day is row R + K - 1
+        want = np.zeros_like(diff); want[row] = 0.10 * -0.4
+        assert np.allclose(diff, want, atol=1e-15), (lag, np.nonzero(np.abs(diff) > 1e-15)[0], row, diff[row])
+        assert fr.metrics["freeze_markdown_events"] == 1 and abs(fr.metrics["freeze_markdown_annual_bp"] - (-0.04 / len(diff) * pp.periods_per_year * 1e4)) < 1e-9
+        assert "freeze_markdown_events" not in base.metrics
+        # the engine without the option is bit for bit the old result
+        assert np.array_equal(q.backtest_weights(pp, W, freeze_days=None, freeze_return=-0.4, **kw).net_returns.to_numpy(), base.net_returns.to_numpy())
+        # the portfolio engine, name 0 held by every day's long leg
+        f = pd.DataFrame(np.random.default_rng(lag).normal(size=p.close.shape), index=p.dates, columns=p.tickers); f.iloc[:, 0] = 100.0
+        pkw = dict(long_q=0.2, short_q=None, hold=1, spread_bp=0.0, benchmark=None, grid=True)
+        b2 = q.backtest_portfolio(pp, f, **pkw); f2 = q.backtest_portfolio(pp, f, freeze_days=K, freeze_return=-0.4, **pkw)
+        d2 = (f2.net_returns - b2.net_returns).to_numpy()
+        w2 = np.zeros_like(d2); w2[row] = -0.4 * b2.holdings[row, [0, 1, 2]].sum()        # every suspended name the long leg holds that day (1 and 2 may be in it)
+        assert b2.holdings[row, 0] > 0
+        assert np.allclose(d2, w2, atol=1e-15), (lag, np.nonzero(np.abs(d2) > 1e-15)[0], row)
+        assert abs(f2.grid["h1_c0"]["CAGR"] - b2.grid["h1_c0"]["CAGR"]) > 1e-9           # the sensitivity grid carries the markdown too
+    for bad in ({"freeze_days": 0}, {"freeze_days": True}, {"freeze_days": 2.5}, {"freeze_days": 5, "freeze_return": 0.1}, {"freeze_days": 5, "freeze_return": -1.5}, {"freeze_days": 5, "freeze_return": float("nan")}):
+        _raises(lambda: q.backtest_weights(pp, W, benchmark=None, check_universe=False, **bad), "freeze")
+        _raises(lambda: q.backtest_portfolio(pp, f, long_q=0.2, short_q=None, hold=1, benchmark=None, **bad), "freeze")
+    print("X4d a suspended long is marked down once, on the K-th suspended day, at every entry lag; shorts, unheld names and other days are untouched; both engines; bad arguments raise  PASS")
+
+
+def test_cap_gross():
+    # hand scenario: name 0 is held at 0.2 and cannot be sold on rows 50..79 although the target for it is 0 from row 50; names 1..4 want 0.2 each
+    T, N = 120, 6
+    tgt = np.zeros((T, N)); tgt[:, 1:5] = 0.2; tgt[:50, 0] = 0.2
+    can_sell = np.ones((T, N), bool); can_sell[50:80, 0] = False
+    free, st0 = ex.realize(tgt, None, can_sell)
+    capd, st1 = ex.realize(tgt, None, can_sell, cap_gross=True)
+    assert np.allclose(free[60], [0.2, 0.2, 0.2, 0.2, 0.2, 0.0])                                   # without the cap the gross is 1.0 while the target's is 0.8
+    # with it: stuck 0.2, target gross 0.8, free names' target 0.8 -> k = (0.8 - 0.2) / 0.8 = 0.75, so they hold 0.15 each and the total is 0.8
+    assert np.allclose(capd[60], [0.2, 0.15, 0.15, 0.15, 0.15, 0.0], atol=1e-12), capd[60]
+    assert abs(np.abs(capd[60]).sum() - 0.8) < 1e-12
+    assert np.allclose(capd[:49], free[:49]) and np.allclose(capd[80:], free[80:])                  # nothing blocked before row 50 and after row 79: the same as without the cap
+    assert np.allclose(capd[85], [0, 0.2, 0.2, 0.2, 0.2, 0]) and abs(st1["mean_free_scale"] - (1 - 30 * 0.25 / T)) < 1e-12 and st0["mean_free_scale"] == 1.0
+    # it never scales up: a buy that is blocked leaves the stuck weight below its target, k would exceed 1 and is clipped to 1
+    tgt2 = np.zeros((T, N)); tgt2[:, 1:5] = 0.2; tgt2[:50, 0] = 0.2; tgt2[50:, 0] = 0.3
+    can_buy = np.ones((T, N), bool); can_buy[50:80, 0] = False
+    a, _ = ex.realize(tgt2, can_buy, None, cap_gross=True)
+    assert np.allclose(a[60], [0.2, 0.2, 0.2, 0.2, 0.2, 0.0]) and np.allclose(a[85], [0.3, 0.2, 0.2, 0.2, 0.2, 0.0])
+    # a short position that cannot be bought back: signed targets, the free names are scaled in absolute terms
+    tgt3 = np.zeros((T, N)); tgt3[:, 1] = 0.3; tgt3[:, 2] = -0.3; tgt3[:50, 3] = -0.2
+    cb = np.ones((T, N), bool); cb[50:80, 3] = False                                                # covering the short in name 3 is blocked
+    b, _ = ex.realize(tgt3, cb, None, cap_gross=True)
+    assert np.allclose(b[60], [0, 0.3 * 0.6 / 0.6 * (0.6 - 0.2) / 0.6, -0.3 * (0.6 - 0.2) / 0.6, -0.2, 0, 0], atol=1e-12), b[60]    # k = (0.6 - 0.2) / 0.6
+    # infeasible: the stuck positions alone (0.5 and 0.4) exceed the target gross (0.3 in the free name), so nothing can meet the cap: k = 0, the day is counted
+    tg4 = np.zeros((T, N)); tg4[:50, 0] = 0.5; tg4[:50, 1] = 0.4; tg4[50:, 2] = 0.3
+    cs4 = np.ones((T, N), bool); cs4[50:80, 0] = False; cs4[50:80, 1] = False                       # neither can be sold on rows 50..79
+    c4, s4 = ex.realize(tg4, None, cs4, cap_gross=True)
+    assert np.allclose(c4[60], [0.5, 0.4, 0.0, 0, 0, 0]) and s4["infeasible_days"] == 30, (c4[60], s4["infeasible_days"])
+    # and just feasible: stuck 0.5 + free 0.3 * k = target gross 0.6 -> k = 1/3
+    tg5 = np.zeros((T, N)); tg5[:50, 0] = 0.5; tg5[50:, 2] = 0.6 - 0.0; tg5[50:, 0] = 0.0
+    c5, s5 = ex.realize(tg5, None, None, cap_gross=True)                                            # nothing blocked here: the cap does nothing
+    assert np.allclose(c5[60], [0, 0, 0.6, 0, 0, 0]) and s5["infeasible_days"] == 0
+    cs5 = np.ones((T, N), bool); cs5[50:80, 0] = False
+    c6, s6 = ex.realize(tg5, None, cs5, cap_gross=True)
+    assert np.allclose(c6[60], [0.5, 0, 0.6 * (0.6 - 0.5) / 0.6, 0, 0, 0], atol=1e-12) and s6["infeasible_days"] == 0, c6[60]   # k = (0.6 - 0.5) / 0.6
+    # property: over random masks the gross never exceeds the target's, the free names are never scaled up, and with nothing blocked the result is unchanged
+    rng = np.random.default_rng(7)
+    bad = 0
+    for trial in range(60):
+        T2, N2 = 80, 10
+        tg = rng.normal(0, 0.1, (T2, N2)) * (rng.random((T2, N2)) > 0.3)
+        cbm = rng.random((T2, N2)) > 0.15; csm = rng.random((T2, N2)) > 0.15
+        out, st = ex.realize(tg, cbm, csm, cap_gross=True)
+        if True:
+            prev_ = np.vstack([np.zeros((1, N2)), out[:-1]])
+            held_ = (np.abs(out - prev_) < 1e-15) & (np.abs(out - tg) > 1e-12)                       # names that stayed although the target differs: stuck
+            g_stuck = np.where(held_, np.abs(out), 0.0).sum(axis=1)
+            over = np.abs(out).sum(axis=1) > np.abs(tg).sum(axis=1) + 1e-9
+            bad += int((over & (g_stuck <= np.abs(tg).sum(axis=1) - 1e-9)).sum())                    # allowed only where the stuck positions alone exceed the target gross
+        none, _ = ex.realize(tg, np.ones_like(cbm), np.ones_like(csm), cap_gross=True)
+        assert np.array_equal(none, tg)
+        assert np.array_equal(ex.realize(tg, cbm, csm, cap_gross=False)[0], ex.realize(tg, cbm, csm)[0])
+    assert bad == 0, bad
+    # engines: all-True masks leave the result bit for bit; a block makes the gross smaller with the cap and reports the scale
+    p, f = _panel(seed=51, T=300, N=40)
+    allok = pd.DataFrame(True, index=p.dates, columns=p.tickers)
+    kw = dict(long_q=0.2, short_q=0.2, hold=3, spread_bp=10.0, benchmark=None, grid=False)
+    base = q.backtest_portfolio(replace(p, can_buy=allok, can_sell=allok), f, **kw)
+    same = q.backtest_portfolio(replace(p, can_buy=allok, can_sell=allok), f, cap_gross=True, **kw)
+    assert np.array_equal(base.net_returns.to_numpy(), same.net_returns.to_numpy()) and same.metrics["mean_free_scale"] == 1.0
+    okm = allok.copy(); okm.iloc[100:200, :5] = False
+    pm = replace(p, can_buy=okm, can_sell=okm)
+    a1 = q.backtest_portfolio(pm, f, **kw); a2 = q.backtest_portfolio(pm, f, cap_gross=True, **kw)
+    g1, g2 = np.abs(a1.holdings).sum(axis=1), np.abs(a2.holdings).sum(axis=1)
+    assert g2[100:200].mean() < g1[100:200].mean() and a2.metrics["mean_free_scale"] < 1.0 and a2.metrics["cap_infeasible_days"] >= 0
+    assert "mean_free_scale" not in a1.metrics
+    print("X4e the gross cap equals a hand computation (k = 0.75 and 0.6/0.6), never scales up, leaves unblocked days untouched, holds on 60 random cases (except where the stuck positions alone exceed the target gross, which nothing can fix); both engines  PASS")
 
 
 def test_tradability_builder():
@@ -343,6 +494,9 @@ if __name__ == "__main__":
     test_portfolio_masks()
     test_portfolio_asymmetric_masks()
     test_delisted_positions_are_not_frozen()
+    test_freeze_episodes()
+    test_freeze_markdown()
+    test_cap_gross()
     test_tradability_builder()
     test_lots()
     test_min_trade()

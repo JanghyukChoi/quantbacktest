@@ -46,7 +46,7 @@ import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
 from .core.panel import Panel
-from .execution import exec_masks, realize
+from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config,
                         _side_label, metrics)
 
@@ -91,7 +91,8 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
                      impact: ImpactModel | None = None, funding: bool = True, delist_return: float | None = None,
                      benchmark: str | None = "cap", ledger=None, family: str = "default",
                      name: str | None = None, check_universe: bool = True, check_shortable: bool = True,
-                     capital: float | None = None, price=None, lot=1.0, min_trade_value: float = 0.0) -> PortfolioResult:
+                     capital: float | None = None, price=None, lot=1.0, min_trade_value: float = 0.0,
+                     freeze_days: int | None = None, freeze_return: float = 0.0, cap_gross: bool = False) -> PortfolioResult:
     """Net returns of the weights you supply. See the module docstring for timing and costs.
 
     `check_universe` raises if a long or a short position is opened or increased in a security that is not eligible that day. It looks at
@@ -101,6 +102,9 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     `capital` (money, same currency as `price` and `ImpactModel.aum`), `price` (date x ticker **real** price level on the day of the row, as for the weights:
     a back-adjusted series has an arbitrary level and gives wrong share counts; the engine sizes row t at `price` of day t + `entry_lag`, the day it is traded), `lot` (shares per lot: a number, a Series by ticker or a date x ticker frame) and
     `min_trade_value` (money; a number or a Series by ticker) switch on whole-lot sizes; without `capital` they must be left alone.
+    `freeze_days`, `freeze_return`: a long position in a security whose suspension (a price but no volume) reaches `freeze_days` days is marked down once by
+    `freeze_return` (between -1 and 0), on the day it reaches that length; shorts are not credited. A scenario, not a measurement (see `execution.freeze_episodes`).
+    `cap_gross`: positions that cannot be traded tie up capital; the free names are scaled down so that the gross exposure stays at the target's (see `execution.realize`).
     `check_shortable` (only with `panel.shortable`) raises if a short is opened or increased where the security cannot be sold short.
 
     Costs are charged on the **net** trade per security. `backtest_portfolio` charges its long and short legs as separate sleeves,
@@ -109,6 +113,8 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     _check_benchmark(benchmark)
     _check_cost(spread_bp, "spread_bp")
     _check_cost(borrow_bp, "borrow_bp")
+    fz = freeze_hits(panel, freeze_days)
+    freeze_return = check_freeze_return(freeze_return)
     bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
     sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
     W = weights.reindex(index=panel.dates, columns=panel.tickers)
@@ -163,10 +169,12 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     H_in = H                                                            # what was asked for; `H` becomes what could be held
     if bo is not None or capital is not None:
         H, ex = realize(H, bo, so, capital=capital, price=px if capital is not None else None,
-                        lot=lot_ if capital is not None else 1.0, min_trade_value=mtv)
+                        lot=lot_ if capital is not None else 1.0, min_trade_value=mtv, cap_gross=cap_gross)
     fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     cut = len(panel.dates) - (panel.entry_lag + 1)
     gross = (H * fwd).sum(axis=1)
+    mark = (np.maximum(H, 0.0) * fz).sum(axis=1) * freeze_return if fz is not None else np.zeros(len(gross))
+    gross = gross + mark
     spread = apply_turnover_cost(H, spread_bp)                          # the first row, a build from cash, is not charged
     side = apply_side_cost(H, bb, sb)
     short = np.maximum(-H, 0.0)
@@ -189,11 +197,17 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
               "impact_annual_bp": float(imp[:cut].mean() * ppy * 1e4), "funding_annual_bp": float(fcost[:cut].mean() * ppy * 1e4),
               "avg_gross_exposure": float(np.abs(H[:cut]).sum(axis=1).mean()), "avg_net_exposure": float(H[:cut].sum(axis=1).mean()),
               "delist_events_held": int(((H != 0) & hit_next)[:cut].sum()), "nan_weights_treated_as_zero": n_nan})
+    if fz is not None:
+        m["freeze_markdown_annual_bp"] = float(mark[:cut].mean() * ppy * 1e4)
+        m["freeze_markdown_events"] = int(((H > 0) & fz)[:cut].sum())
     if ex is not None:
         m["blocked_trades"] = int(ex["blocked_trades"])
         m["blocked_turnover_share"] = float(ex["blocked_turnover"] / ex["asked_turnover"]) if ex["asked_turnover"] > 0 else 0.0
         m["mean_stuck_weight"] = float(ex["mean_stuck_weight"])
         m["longest_freeze_days"] = int(ex["longest_freeze_days"])
+        if cap_gross:
+            m["mean_free_scale"] = float(ex["mean_free_scale"])
+            m["cap_infeasible_days"] = int(ex["infeasible_days"])
         if capital is not None:
             m.update({"min_trade_skipped": int(ex["min_trade_skipped"]), "min_trade_skipped_share": float(ex["min_trade_skipped_share"]),
                       "mean_abs_rounding_gap": float(ex["mean_abs_rounding_gap"])})
@@ -216,11 +230,13 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
             "impact": None if impact is None else {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window,
                                                    "adv_window": impact.adv_window, "max_cost_bp": impact.max_cost_bp},
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
+            "freeze": None if freeze_days is None else {"days": int(freeze_days), "return": freeze_return},
             "execution": None if (bo is None and capital is None) else {"blocked": bo is not None, "capital": capital,
                                                                                     "min_trade_value": float(mtv) if np.ndim(mtv) == 0 else "by security"}}
     if ledger is not None:
         from .ledger import array_fingerprint
-        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp", "execution")}, **_side_config(bb, sb), **_exec_config(capital, price, lot, mtv),
+        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp", "execution", "freeze")}, **_side_config(bb, sb), **_exec_config(capital, price, lot, mtv),
+                                                    **({"freeze_days": int(freeze_days), "freeze_return": freeze_return} if freeze_days is not None else {}), **({"cap_gross": True} if cap_gross else {}),
                                                     "spread_bp": spread_bp if np.ndim(spread_bp) == 0 else array_fingerprint(spread_bp),
                                                     "weights": array_fingerprint(H_in), "data": panel.fingerprint()})
     return PortfolioResult(spec=spec, metrics=m, benchmark=bench, excess=bexc, yearly={str(k): v for k, v in yr.items()}, grid=None,

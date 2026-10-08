@@ -21,7 +21,7 @@ import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
 from .core.panel import Panel
-from .execution import exec_masks, realize
+from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 
 ANN = 252
 
@@ -196,8 +196,8 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        hold: int = 5, weighting: str = "equal",
                        spread_bp=20.0, buy_bp=0.0, sell_bp=0.0, benchmark: str | None = "cap",
                        grid: bool = True, funding: bool = True,
-                       delist_return: float | None = None,
-                       ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
+                       delist_return: float | None = None, freeze_days: int | None = None, freeze_return: float = 0.0,
+                       cap_gross: bool = False, ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
     """Factor -> portfolio result.
 
     factor      numeric score (higher = long). A boolean frame is refused: use backtest_event for yes/no signals.
@@ -213,11 +213,18 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     benchmark   cap (market-cap weighted) | equal (equal weighted) | None
     funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
     ledger      pitbacktest.ledger.Ledger. If given, this run is recorded in it, so the number of trials reaches the deflated Sharpe.
+    freeze_days, freeze_return  A long position in a security whose suspension (a price but no volume) reaches `freeze_days` days is marked down once
+                by `freeze_return` (between -1 and 0), on the day it reaches that length. Short positions are not credited: the gain cannot be taken while the
+                security is frozen. A scenario, not a measurement: `execution.freeze_episodes` measures how suspensions ended in your data. None: no markdown.
+    cap_gross   True: a position that cannot be traded (see `Panel.can_buy`) ties up capital, so the free names of that leg are scaled down to keep the leg's gross
+                exposure at its target instead of piling new positions on top (see `execution.realize`). Only matters where something is blocked. Off by default.
     family      name that groups runs of one research question in the ledger. name labels this trial (the same label with other settings is another trial).
     delist_return  assumed return on the day **after** the last real bar of a security flagged in panel.delist_after.
                 None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
     """
     _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, benchmark)
+    fz = freeze_hits(panel, freeze_days)
+    freeze_return = check_freeze_return(freeze_return)
     bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
     sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
@@ -245,20 +252,23 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
         return _normalize(w)
 
     bo, so = exec_masks(panel)                                           # can the trade be done on the execution day? (None: always)
-    ex = {"asked_turnover": 0.0, "blocked_turnover": 0.0, "blocked_trades": 0, "mean_stuck_weight": 0.0, "longest_freeze_days": 0}
+    ex = {"asked_turnover": 0.0, "blocked_turnover": 0.0, "blocked_trades": 0, "mean_stuck_weight": 0.0, "longest_freeze_days": 0, "mean_free_scale": 0.0, "infeasible_days": 0, "legs": 0}
 
     def execute(h: np.ndarray, sign: float, record: bool) -> np.ndarray:
         """The leg's positions after blocked trades. A short leg is a negative position, so covering it is a buy."""
         if bo is None:
             return h
-        pos, st = realize(sign * h, bo, so)
+        pos, st = realize(sign * h, bo, so, cap_gross=cap_gross)
         if record:
-            for k in ex:
+            for k in st.keys() & ex.keys():
                 ex[k] = max(ex[k], st[k]) if k == "longest_freeze_days" else ex[k] + st[k]
+            ex["legs"] += 1
         return sign * pos
 
     hl = execute(_tranche(leg(long_q, True), hold), 1.0, True)
     gross = (hl * fwd).sum(axis=1)
+    mark = (hl * fz).sum(axis=1) * freeze_return if fz is not None else np.zeros(len(gross))          # the one-off markdown of frozen longs
+    gross = gross + mark
     cost = apply_turnover_cost(hl, spread_bp)
     side = apply_side_cost(hl, bb, sb)
     turn = turnover(hl)
@@ -281,12 +291,18 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     m["turnover_daily"] = float(turn[:cut].mean())
     m["cost_annual_bp"] = float(cost[:cut].mean() * panel.periods_per_year * 1e4)
     m["gross_CAGR"] = metrics(gross[:cut], panel.dates, panel.periods_per_year)["CAGR"]
+    if fz is not None:
+        m["freeze_markdown_annual_bp"] = float(mark[:cut].mean() * panel.periods_per_year * 1e4)        # negative: the return given up
+        m["freeze_markdown_events"] = int(((hl > 0) & fz)[:cut].sum())
     m["side_cost_annual_bp"] = float(side[:cut].mean() * panel.periods_per_year * 1e4)   # the part of cost_annual_bp from buy_bp and sell_bp
     if bo is not None:
         m["blocked_trades"] = int(ex["blocked_trades"])                  # name-days on which a wanted trade could not be done
         m["blocked_turnover_share"] = float(ex["blocked_turnover"] / ex["asked_turnover"]) if ex["asked_turnover"] > 0 else 0.0
         m["mean_stuck_weight"] = float(ex["mean_stuck_weight"])             # both legs, in units of capital
         m["longest_freeze_days"] = int(ex["longest_freeze_days"])
+        if cap_gross:
+            m["mean_free_scale"] = float(ex["mean_free_scale"] / max(ex["legs"], 1))                  # 1 means nothing had to be scaled down
+            m["cap_infeasible_days"] = int(ex["infeasible_days"])               # leg-days on which the stuck positions alone exceeded the target
     if panel.shortable is not None and short_q:
         m["short_leg_empty_days"] = int((el.to_numpy(bool).any(axis=1) & ~el_s.to_numpy(bool).any(axis=1))[:cut].sum())   # eligible names exist, none can be sold short
     m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
@@ -311,7 +327,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             hl2 = execute(_tranche(leg(long_q, True), h), 1.0, False)
             hs2 = execute(_tranche(leg(short_q, False), h), -1.0, False) if short_q else None
             for c in (0, 2, 5, 10, 20):
-                gr = (hl2 * fwd).sum(axis=1)
+                gr = (hl2 * fwd).sum(axis=1) + ((hl2 * fz).sum(axis=1) * freeze_return if fz is not None else 0.0)
                 co = apply_turnover_cost(hl2, c) + apply_side_cost(hl2, bb, sb) + (hl2 * fwdf).sum(axis=1)
                 if short_q:
                     gr = gr - (hs2 * fwd).sum(axis=1)
@@ -325,13 +341,14 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             "long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
             "spread_bp": spread_bp if np.isscalar(spread_bp) else array_fingerprint(spread_bp),
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
-            **_side_config(bb, sb),
+            **_side_config(bb, sb), **({"freeze_days": int(freeze_days), "freeze_return": freeze_return} if freeze_days is not None else {}), **({"cap_gross": True} if cap_gross else {}),
             "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
               "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": panel.periods_per_year,
               "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp flat",
               "buy_bp": _side_label(bb), "sell_bp": _side_label(sb),
+              "freeze": None if freeze_days is None else {"days": int(freeze_days), "return": freeze_return},
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,
