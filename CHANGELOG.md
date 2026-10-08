@@ -26,6 +26,17 @@
 - **Fixed**: the README, the `screen` docstring and the package docstring said `screen` reports post-control results only. Only `t` and `neu_*` are
   computed with controls; `excess_bp`, `net_bp` and `rho` come from the uncontrolled top-decile firing. The wording is corrected everywhere, and the
   `Panel.forward` docstring (which described a log accumulation that never existed) is rewritten.
+- **Side-specific costs.** `backtest_portfolio` and `backtest_weights` take `buy_bp` and `sell_bp` (a float, a Series indexed by date for a rate that
+  changes on a date, or a date x ticker frame), charged on top of the spread. A weight going down is a sell, so opening a short pays `sell_bp`. An unknown
+  value (NaN, a date before the first entry) raises. `metrics` gain `side_cost_annual_bp`; `cost_annual_bp` includes it. Runs recorded without them keep their
+  ledger fingerprint.
+- **Short-selling limits.** `Panel.shortable` (bool frame; what is missing counts as not shortable). `backtest_portfolio` picks the short leg among shortable
+  names (`short_leg_empty_days` counts days with none); `backtest_weights` raises when a short is opened or increased where it cannot be sold short
+  (`check_shortable`). `shortable_from_bans` builds the frame from ban periods and exemptions. **No ban calendar and no tax table ship with the library.**
+- `adapters.krx.build_krx_panel` records the market of every security on every day in `meta`; `adapters.krx.sell_tax_panel` turns a rate schedule per market
+  into a date x ticker panel for `sell_bp`.
+- **Changed**: `backtest_weights(check_universe=True)` now looks at long and short exposure separately, so turning a long into a smaller short in a name that is
+  not eligible raises (it used to pass because the absolute weight shrank).
 - **Fixed (second independent review)**: `inject_delistings(hazard="illiquid")` raised `IndexError` on any panel whose first calendar year had 100 or more bars
   (there is nothing earlier to tilt on), and `hazard="volatile"` silently became uniform there; the first year is now drawn uniformly. `Panel.fingerprint` left out
   `volume`, `mkt_cap`, `open`, `high`, `low` and `chars`, so two impact-model runs that differed only in volume counted as one trial; they are now hashed.

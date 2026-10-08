@@ -100,6 +100,29 @@ q.capacity_curve(panel, weights, aums=[1e6, 5e6, 25e6, 100e6], y_values=(0.5, 1.
 | It reports participation (p99, max, share of trades above 10% of ADV) next to the cost | The square-root law is least reliable at high participation; look at both |
 | Costs are on the net trade per name | `backtest_portfolio` charges its two legs as separate sleeves; with overlapping tranches the two can differ by the netting saving |
 
+## Taxes on one side, and short-selling limits
+
+A flat round-trip spread cannot say that a sales tax is paid when a position is **sold**, including when a short is opened, or that
+the rate changed on a date. Both engines take `buy_bp` and `sell_bp` for that, on top of the spread:
+
+```python
+tax = pd.Series([15.0, 20.0], index=[panel.dates[0], pd.Timestamp("2021-01-04")])     # a rate that changes on a date (example numbers)
+r = q.backtest_portfolio(panel, factor, long_q=0.2, short_q=0.2, hold=5, spread_bp=10, sell_bp=tax)
+
+ban = q.shortable_from_bans(panel.dates, panel.tickers, [("2020-03-16", "2020-09-15")])    # your checked ban periods
+r = q.backtest_portfolio(replace(panel, shortable=ban), factor, sell_bp=tax)               # the short leg is picked among shortable names
+tax_panel = krx.sell_tax_panel(krx_panel, {"KOSPI": [...], "KOSDAQ": [...]})                # rates by market and effective date
+```
+
+| Choice | Why |
+|---|---|
+| A missing rate (NaN, or a date before the first entry) raises, unlike a NaN in a spread panel | A rate you do not know is not zero; a zero would look like a market without the tax |
+| Opening a short pays `sell_bp`, covering it pays `buy_bp` | That is how a sales tax works |
+| `Panel.shortable` is a bool frame; what is missing from it counts as **not** shortable | An unknown is not permission |
+| `backtest_portfolio` ranks the short leg among shortable names; with none, that day is long-only (`short_leg_empty_days`) | It cannot short what it cannot borrow |
+| `backtest_weights` raises when a short is opened or increased where it cannot be sold short (`check_shortable`) | A weight file that shorts during a ban is not a result |
+| **No rate table and no ban calendar ship with the library** | Rates, effective dates and exemptions are law and change; a wrong table is worse than none. Check them against the tax authority and the regulator's notices |
+
 ## Intraday bars (Binance, 1 minute and up)
 
 ```python
@@ -238,6 +261,7 @@ python tests/test_equity.py         # equity tools: delisting scenarios (known a
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
 python tests/test_delisting_and_guards.py # a window that runs into a delisting keeps its loss; screen and backtest_event count delisted trades; intraday and cost guards
+python tests/test_side_costs_shorting.py # buy and sell costs, dated rates, short-selling limits, KRX sell-tax panel
 python tests/test_argument_checks.py # bad arguments raise a clear error instead of quietly running something else
 python tests/test_costs_events.py    # spread estimators, crypto costs, event signals and their neutralisation, FM with missing returns, panel checks
 python tests/test_yfinance_adapter.py # the free-data adapter against a fake yfinance: when it warns about survivorship, market-cap paths, errors
@@ -266,6 +290,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| S1 to S9 | Buy and sell costs equal an independent loop for weights that change sign (to 1e-18); `backtest_portfolio` and `backtest_weights` agree with them, also when the legs empty and refill (the case where swapping the two rates matters); a dated rate is read per date; an unknown rate raises; the short leg is chosen among shortable names; shorts cannot be opened where they cannot be sold; a long turned into a smaller short outside the universe is caught; `shortable_from_bans` and `krx.sell_tax_panel` build the right frames. Eleven planted bugs are all caught |
 | DG1 to DG3 | `Panel.forward` keeps the loss of a trade that runs into a delisting (hand-computed, with and without `delist_return`), `backtest_event` and `screen` count those trades, and the intraday, cost, hazard and short-panel guards hold. Ten planted removals are all caught |
 | AC1 to AC4 | bad arguments stop with a clear error (mistyped weighting or benchmark, quantiles outside (0, 1], short_q=0, hold below 1, a negative cost that used to turn a Sharpe of -1.01 into +0.96, a boolean factor, horizons, an impact model that makes no sense), and the `screen` default of 20 shuffled-null repetitions, since two repetitions give a threshold biased far below pure noise. Twenty planted removals are all caught |
 | CE1 to CE11 | Roll recovers a 2 cent spread, Corwin-Schultz a 40 bp one, the spread model its coefficients, the crypto cost model is exact, an event signal that only echoes a control keeps -8% of its effect after controls while a real 100 bp effect keeps 102%, Fama-MacBeth with missing returns equals a per-day least squares, the paired difference, panel validation and the point-in-time mask follow their documentation |
