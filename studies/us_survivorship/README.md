@@ -18,14 +18,14 @@ difference is a lower bound**. The report keeps what is measured apart from what
 ## What the numbers say
 
 - **The measured difference is indistinguishable from zero in this sample.** For all 16 comparisons (4 factors x 2 holding periods x 2 cost
-  levels) `Sharpe(B) - Sharpe(A_T)` lies between -0.07 and +0.04, and every 95% interval includes zero. The intervals are about 0.29 Sharpe wide,
+  levels) `Sharpe(B) - Sharpe(A_T)` lies between -0.06 and +0.04, and every 95% interval includes zero. The intervals are about 0.29 Sharpe wide,
   so a difference smaller than roughly 0.15 cannot be seen here. **That is not evidence that the bias is zero.**
 - **Why not: A_T holds few distress delistings.** Of 170 securities flagged as delisted, 16 (9%) fell by more than half in their last year. The
   takeovers that make up most of the rest tend to leave at a premium, which does not hurt a survivors-only result the way a bankruptcy does.
 - **The scenario (assumed, not measured)** puts distress delistings back at 1%, 2% and 3% a year with returns of -30% and -55%. Then the survivors-only
   shortcut overstates momentum and the illiquidity factor by 0.03 to 0.17 Sharpe and understates reversal and low volatility by up to 0.17 in some cells.
   The sign depends on the factor, as it did for Korean stocks, and the size depends on rates and returns nobody measured for this sample.
-- Exposure: beta to the equal-weight market is almost identical for A_T and B (differences of 0.01 to 0.03); the neutralised comparison is read with the rule
+- Exposure: beta to the equal-weight market is almost identical for A_T and B (differences of 0.00 to 0.03); the neutralised comparison is read with the rule
   fixed in advance (6 not explained, 10 largely exposure), which carries little when the raw difference is itself indistinguishable from zero.
 
 ## Limits (see also the preregistration)
