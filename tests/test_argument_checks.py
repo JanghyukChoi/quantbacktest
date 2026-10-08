@@ -97,8 +97,26 @@ def test_screen_and_event_arguments():
     print("AC3 screen and event: primary_h outside horizons, empty or non-positive horizons and negative costs raise; zero cost runs  PASS")
 
 
+def test_screen_null_repetitions():
+    import inspect
+    assert inspect.signature(q.screen).parameters["n_null"].default >= 10                     # the default is a usable threshold
+    p, _ = make_panel(n_days=500, n_stocks=60)
+    f = -p.close.pct_change(7)
+    _raises(lambda: q.screen(p, {"a": f}, horizons=(5,), primary_h=5, n_null=0), "n_null")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        q.screen(p, {"a": f}, horizons=(5,), primary_h=5, n_null=2, neutralize_all=False)
+    assert any("n_null=2" in str(x.message) and "biased low" in str(x.message) for x in w), [str(x.message)[:50] for x in w]
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        q.screen(p, {"a": f}, horizons=(5,), primary_h=5, n_null=10, neutralize_all=False)
+    assert not any("n_null" in str(x.message) for x in w)
+    print("AC4 screen: n_null below 10 warns that the threshold is biased low, 0 raises, and the default is 20  PASS")
+
+
 if __name__ == "__main__":
     test_portfolio_arguments()
     test_weights_arguments()
     test_screen_and_event_arguments()
+    test_screen_null_repetitions()
     print("argument check tests: all passed")

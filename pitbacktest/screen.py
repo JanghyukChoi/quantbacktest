@@ -12,6 +12,7 @@ Principles
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -54,7 +55,7 @@ def _deploy(fire: np.ndarray, cum: np.ndarray, ev: np.ndarray,
 def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
            horizons: tuple[int, ...] = (1, 5, 20, 60),
            primary_h: int = 20, cost_bp: float = 20.0,
-           fire_q: float = 0.10, n_null: int = 2,
+           fire_q: float = 0.10, n_null: int = 20,
            gate_config: GateConfig | None = None,
            neutralize_all: bool = True) -> ScreenResult:
     """Screen many factors at once.
@@ -68,6 +69,12 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     ctrl = build_controls(panel)
     if not horizons or any(isinstance(h, bool) or not isinstance(h, (int, np.integer)) or h < 1 for h in horizons):
         raise ValueError(f"horizons must be whole numbers of periods, at least 1, got {horizons!r}")
+    if n_null < 1:
+        raise ValueError(f"n_null must be at least 1, got {n_null!r}")
+    if n_null < 10:
+        warnings.warn(f"n_null={n_null}: the G1 threshold is the 95th percentile of only {n_null} shuffled |t| values, which is biased low and moves between "
+                      f"seeds (on a test panel it averaged 0.9 with n_null=2 and 1.8 with n_null=20; the 95th percentile of pure noise is about 1.96). "
+                      f"Use at least 10.", stacklevel=2)
     if primary_h not in horizons:
         raise ValueError(f"primary_h={primary_h} must be one of horizons {tuple(horizons)}")
     if not (cost_bp >= 0 and np.isfinite(cost_bp)):

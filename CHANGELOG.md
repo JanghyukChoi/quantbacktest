@@ -18,6 +18,9 @@
 - `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
 - Docstrings, comments, warnings and example output are now in English (the Korean left is the security-name filter and the quota message of the
   KRX adapter, which must match Korean text). Gate names and the `screen()` funnel keys are English too.
+- **Fixed (found while writing the specification)**: the `screen` gate G1 threshold is the 95th percentile of shuffled |t| values, and the default
+  `n_null=2` made it the percentile of two numbers: biased far below the level of pure noise (about 0.9 on average against 1.96, 1.8 with 20 repetitions), so G1
+  passed too easily. The default is now 20, fewer than 10 warns and fewer than 1 raises.
 - **Fixed (found while writing the specification)**: bad arguments used to run something else without a word. A mistyped `weighting` or `benchmark`
   was read as another option, `long_q` outside (0, 1] ran, `short_q=0` silently meant long-only, `hold=0` gave a Sharpe of 0, a **negative cost paid the
   strategy for trading** (a Sharpe of -1.01 became +0.96), and a boolean factor was documented as supported but was not. All of these now raise a

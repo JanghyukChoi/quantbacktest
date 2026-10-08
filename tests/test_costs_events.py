@@ -299,6 +299,24 @@ def test_chars_definitions():
     print("CE10 the five characteristics follow their definitions; inputs that are not given are left out, not invented  PASS")
 
 
+# ------------------------------------------------------------------------------------------------ CE11
+def test_shuffled_null_threshold_is_biased_low_with_few_repetitions():
+    """The G1 threshold of `screen` is the 95th percentile of the shuffled |t| values. With 2 repetitions that is the percentile of two numbers:
+    biased far below the level of pure noise (about 1.96). This is why the default is 20 and fewer than 10 warns."""
+    from pitbacktest.core.estimators import shuffle_columns, shuffle_null
+    from pitbacktest.core.controls import xs_norm
+    p, _ = _panel(T=600, N=100, seed=0)
+    ctrl = build_controls(p, include_chars=False)
+    fwd = {5: p.forward(5)}
+    rep = -p.close.pct_change(7)
+    mean = {}
+    for n in (2, 20):
+        v = [shuffle_null(lambda r: xs_norm(shuffle_columns(rep, p.eligible, r), p.eligible), p.eligible, fwd, ctrl, n_rep=n, seed=s)["p95"] for s in range(6)]
+        mean[n] = float(np.mean(v))
+    assert mean[20] - mean[2] > 0.5 and mean[2] < 1.3 and 1.4 < mean[20] < 2.4, mean
+    print(f"CE11 shuffled-null threshold averages {mean[2]:.2f} with 2 repetitions and {mean[20]:.2f} with 20 (pure noise: about 1.96)  PASS")
+
+
 if __name__ == "__main__":
     test_roll_known_answer()
     test_corwin_schultz()
@@ -310,4 +328,5 @@ if __name__ == "__main__":
     test_paired_diff()
     test_panel_validation_audit_and_mask()
     test_chars_definitions()
+    test_shuffled_null_threshold_is_biased_low_with_few_repetitions()
     print("costs and events tests: all passed")

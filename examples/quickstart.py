@@ -35,7 +35,7 @@ factors = {
                     - (vol.rolling(10).mean() / vol.rolling(60).mean()).rank(axis=1, pct=True)),
     "return_per_vol": close.pct_change(10) / (r.rolling(10).std() + 1e-9),
 }
-sr = q.screen(panel, factors, horizons=(1, 5, 20), primary_h=20, n_null=2)
+sr = q.screen(panel, factors, horizons=(1, 5, 20), primary_h=20)
 print("\n[screening funnel]", sr.funnel)
 print(sr.summary[["factor", "t", "net_bp", "rho", "neu_survival_%", "passed"]].round(2).to_string(index=False))
 
