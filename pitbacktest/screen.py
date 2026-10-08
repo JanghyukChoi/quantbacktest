@@ -60,7 +60,8 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     """Screen many factors at once.
 
     factors  {name: (date x ticker) continuous factor}
-    The returned summary holds **post-control figures only** (uncontrolled ones are in factors[name]['raw']).
+    The returned summary holds **post-control figures only**. The uncontrolled coefficient and t of a factor are in
+    result.factors[name]['fm'][h]['coef_bp_raw'] and ['t_raw'].
     """
     el = panel.eligible
     ev = el.values
