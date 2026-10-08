@@ -11,7 +11,7 @@ It is not a strategy and ships no data.
 
 What is different:
 
-- **Survivorship is measured, not assumed.** A free yfinance download returned a correct history for 0 of 42 well-known delisted or
+- **Survivorship is measured, not assumed.** A free yfinance download returned a correct history for 0 of 41 well-known delisted or
   acquired US stocks; a free Tiingo key returned 23 of 29 takeover and rename cases but **none of 12 bankruptcies and rescue sales**
   (`docs/survivorship.md`). On Korean stocks, where the official KRX data is survivorship-free, restricting to today's survivors moved
   the net Sharpe of four factors by -0.23 to +0.20 depending on the factor, averaging about zero, and the understatement of low
@@ -40,7 +40,7 @@ free of survivorship bias.
 |---|---|---|---|
 | Crypto perpetuals (Binance) | `pitbacktest.crypto`, public archive | **Yes**: 900 contracts ever listed, 376 of them delisted or halted. Funding charged, delistings explicit | Tested; preregistered study in `studies/crypto_cross_section` |
 | Korean stocks | `pitbacktest.adapters.krx`, official KRX OpenAPI (free key) | **Yes**: the API returns every stock listed on each day, so later delistings are inside the history. Adjusted returns come from the change versus the reference price, no price-adjustment table needed | Return formula checked on live data (all 953 KOSPI names on 2024-01-02, Samsung's 50:1 split day); panel build tested offline. Measured on 13 years of data: the survivors-only shortcut moves a factor's Sharpe by up to 0.23 in either direction, averaging about zero (`studies/korea_survivorship`) |
-| US stocks | `adapters.yfinance`, or your own point-in-time data through `adapters.long_format` | **Not with yfinance**: it returned a correct history for 0 of 42 well-known delisted or acquired stocks (`docs/survivorship.md`). Yes if you bring CRSP, Sharadar or Norgate data | Detector, coverage report and delisting scenarios. With a free Tiingo key a random 466-ticker sample gives a **lower bound**: the survivors-only difference is indistinguishable from zero (intervals about 0.29 Sharpe wide), which is not evidence of no bias, because free data holds few bankruptcies (`studies/us_survivorship`) |
+| US stocks | `adapters.yfinance`, or your own point-in-time data through `adapters.long_format` | **Not with yfinance**: it returned a correct history for 0 of 41 well-known delisted or acquired stocks (`docs/survivorship.md`). Yes if you bring CRSP, Sharadar or Norgate data | Detector, coverage report and delisting scenarios. With a free Tiingo key a random 466-ticker sample gives a **lower bound**: the survivors-only difference is indistinguishable from zero (intervals about 0.29 Sharpe wide), which is not evidence of no bias, because free data holds few bankruptcies (`studies/us_survivorship`) |
 
 ## Three entry points
 

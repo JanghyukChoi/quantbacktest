@@ -206,7 +206,7 @@ class Panel:
             out["truncation_suspected"] = bool(tail < body * 0.5)
 
         # suspected survivorship bias: in a real market a steady share of securities disappears every year. If almost no security's price stops before the panel's end,
-        # the panel holds only 'securities alive today'. Measured: of 42 well-known delisted or acquired stocks looked up in yfinance,
+        # the panel holds only 'securities alive today'. Measured: of 41 well-known delisted or acquired stocks looked up in yfinance,
         # none came back with a correct history (docs/survivorship.md).
         last = self.close.apply(lambda c: c.last_valid_index())
         ended = last.dropna() < (self.dates[-1] - pd.Timedelta(days=30))

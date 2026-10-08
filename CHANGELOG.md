@@ -18,6 +18,7 @@
 - `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
 - Docstrings, comments, warnings and example output are now in English (the Korean left is the security-name filter and the quota message of the
   KRX adapter, which must match Korean text). Gate names and the `screen()` funnel keys are English too.
+- **Fixed**: the yfinance probe was described as 42 stocks (no data 37) in the README and docs; the list has 41 and a re-run gives no data 36, another company 5, correct history 0.
 - **Fixed (found by independent review of the specification)**: `screen` and `backtest_event` measured returns with `Panel.forward`, which was NaN when the
   exit price was missing, so **a trade that ran into a delisting dropped out of their statistics**: the losses of delisted securities were missing, a
   survivorship leak in the two tools that had no `delist_return`. `Panel.forward` now carries a security flagged in `delist_after` at its last price (or at

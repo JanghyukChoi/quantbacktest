@@ -3,13 +3,13 @@
 **Measured on 2026-10-07 with yfinance 1.7.0** (`docs/survivorship_probe.py` reruns it; Yahoo's data changes, so
 yours may differ).
 
-I looked up 42 well-known US stocks that were delisted, acquired, went bankrupt or changed ticker between 2008 and
+I looked up 41 well-known US stocks that were delisted, acquired, went bankrupt or changed ticker between 2008 and
 2023 (Lehman, Bear Stearns, Silicon Valley Bank, Twitter, Time Warner, Celgene and so on). This is a convenience
 sample chosen from memory, not a statistical sample, so no rate should be read from it.
 
 | yfinance returned | count |
 |---|---|
-| no data at all | 37 |
+| no data at all | 36 |
 | the price history of a **different company** that later reused the ticker (WM, GM, WB, SBNY, SHLD) | 5 |
 | the correct history up to the delisting | **0** |
 
