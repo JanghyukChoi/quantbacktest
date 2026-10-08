@@ -121,11 +121,12 @@ def test_shortable_in_portfolio():
     ok = np.zeros(p.close.shape, bool); ok[:, ::2] = True
     half = replace(p, shortable=pd.DataFrame(ok, index=p.dates, columns=p.tickers))
     r = q.backtest_portfolio(half, f, **kw)
-    H = r.holdings
+    cut = len(r.net_returns)                                                                  # the last `lag` signal rows have no execution day and are not in the result
+    H = r.holdings[:cut]
     assert (H[H < 0].size > 0) and not (H[:, ~ok[0]] < 0).any(), "a short sits on a name that cannot be sold short"
     # reference for one day: the short leg is the bottom q of the shortable, eligible names
     t = 100
-    fv = f.to_numpy()[t]; cand = np.where(ok[t])[0]
+    fv = f.to_numpy()[t]; cand = np.where(ok[t + 1])[0]                                           # shortable is read on the execution day, t + lag
     order = cand[np.argsort(fv[cand])]
     n = len(cand); rank = (np.arange(n) + 1) / n
     expect = set(order[rank <= 0.2])
@@ -135,7 +136,7 @@ def test_shortable_in_portfolio():
     lo = q.backtest_portfolio(p, f, **{**kw, "short_q": None})
     assert np.array_equal(e.net_returns.to_numpy(), lo.net_returns.to_numpy())               # no short possible: the long leg alone
     assert e.metrics["short_leg_empty_days"] == len(e.net_returns) - int((~p.eligible.any(axis=1)).iloc[:len(e.net_returns)].sum()) and "short_leg_empty_days" not in base.metrics
-    assert not (e.holdings < 0).any()
+    assert not (e.holdings[:len(e.net_returns)] < 0).any()                                    # (the last `lag` signal rows have no execution day)
     warm = p.eligible.copy(); warm.iloc[:20] = False                                         # no eligible names at all in a warm-up stretch
     w0 = q.backtest_portfolio(replace(p, eligible=warm, shortable=none.shortable), f, **kw)
     assert w0.metrics["short_leg_empty_days"] == len(w0.net_returns) - 20                   # those days are not blamed on the restriction
@@ -163,6 +164,13 @@ def test_weights_short_checks():
     _raises(lambda: q.backtest_weights(p, book({(10, 40): -0.1, (40, 60): -0.2}), benchmark=None), "cannot be sold short")  # increased: not fine
     _raises(lambda: q.backtest_weights(p, book({(10, 60): 0.3, (40, 60): -0.1}), benchmark=None), "cannot be sold short")   # long -> smaller short
     q.backtest_weights(p, book({(40, 60): 0.1}), benchmark=None)                           # long where no short is allowed: fine
+    ok2 = pd.DataFrame(True, index=p.dates, columns=p.tickers); ok2.iloc[40:, 0] = False             # the ban starts on execution day 40
+    p2 = replace(p, shortable=ok2)
+    W2 = pd.DataFrame(0.0, index=p.dates, columns=p.tickers)
+    W2.iloc[38:60, 0] = -0.1                                                                         # signal row 38: executed on row 39, the last day before the ban
+    q.backtest_weights(p2, W2, benchmark=None)
+    W3 = pd.DataFrame(0.0, index=p.dates, columns=p.tickers); W3.iloc[39:60, 0] = -0.1               # signal row 39: executed on row 40, the first banned day
+    _raises(lambda: q.backtest_weights(p2, W3, benchmark=None), "cannot be sold short", "execution day")
     print("S5 opening or increasing a short where it cannot be sold short raises (also long to a smaller short); holding, reducing or going long does not  PASS")
 
 

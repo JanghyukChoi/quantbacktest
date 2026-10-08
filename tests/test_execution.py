@@ -225,23 +225,32 @@ def test_lots():
     cap, lot = 2e5, 10.0
     r = q.backtest_weights(p, W, capital=cap, price=price, lot=lot, spread_bp=10.0, benchmark=None, check_universe=False)
     H = r.holdings
-    shares = H * cap / price.to_numpy()
-    assert np.allclose(shares / lot, np.round(shares / lot), atol=1e-6), "a position is not a whole number of lots"
-    ref = np.round(W.to_numpy() * cap / price.to_numpy() / lot) * lot * price.to_numpy() / cap
-    assert np.allclose(H, ref, atol=1e-12)
+    px = price.shift(-p.entry_lag).to_numpy()                                                        # row t is traded, so sized, at the price of day t + lag
+    ok_rows = np.isfinite(px).all(axis=1)
+    shares = H * cap / np.where(np.isfinite(px), px, 1.0)
+    assert np.allclose((shares / lot)[ok_rows], np.round(shares / lot)[ok_rows], atol=1e-6), "a position is not a whole number of lots"
+    ref = np.round(W.to_numpy() * cap / px / lot) * lot * px / cap
+    assert np.allclose(H[ok_rows], ref[ok_rows], atol=1e-12)
+    wrong = np.round(W.to_numpy() * cap / price.to_numpy() / lot) * lot * price.to_numpy() / cap          # sized at the signal-day price instead
+    assert not np.allclose(H[ok_rows], wrong[ok_rows], atol=1e-6), "the test cannot tell the two days apart"
     assert r.metrics["mean_abs_rounding_gap"] > 0
     big = q.backtest_weights(p, W, capital=1e15, price=price, lot=1.0, spread_bp=10.0, benchmark=None, check_universe=False)
     plain = q.backtest_weights(p, W, spread_bp=10.0, benchmark=None, check_universe=False)
     assert np.abs(big.net_returns.to_numpy() - plain.net_returns.to_numpy()).max() < 1e-9           # enormous capital: rounding vanishes
     lots_series = pd.Series(np.where(np.arange(25) % 2 == 0, 10.0, 100.0), index=p.tickers)          # lot size by ticker
     rs = q.backtest_weights(p, W, capital=cap, price=price, lot=lots_series, benchmark=None, check_universe=False)
-    sh = rs.holdings * cap / price.to_numpy()
+    sh = (rs.holdings * cap / px)[ok_rows]
     assert np.allclose(sh[:, 1] / 100.0, np.round(sh[:, 1] / 100.0), atol=1e-6) and np.allclose(sh[:, 0] / 10.0, np.round(sh[:, 0] / 10.0), atol=1e-6)
     base_pos = r.holdings
     t0, j0 = next((t, j) for t in range(60, 150) for j in range(25) if base_pos[t - 1, j] != 0 and base_pos[t, j] != base_pos[t - 1, j])   # a day the name would trade
-    nanp = price.copy(); nanp.iloc[t0, j0] = np.nan                                                  # no price that day: nothing to size, the position is kept
+    nanp = price.copy(); nanp.iloc[t0 + p.entry_lag, j0] = np.nan                                    # no price on the execution day: nothing to size, the position is kept
     rn = q.backtest_weights(p, W, capital=cap, price=nanp, lot=lot, benchmark=None, check_universe=False)
     assert rn.holdings[t0, j0] == rn.holdings[t0 - 1, j0] != 0
+    # a flat target needs no price: a delisted name is closed even though it has no price any more (capital given)
+    Wd = pd.DataFrame(0.0, index=p.dates, columns=p.tickers); Wd.iloc[10:31, 2] = -0.1                    # short 10% until row 30, flat from row 31
+    pd_ = price.copy(); pd_.iloc[32:, 2] = np.nan                                                    # no price from row 32 on (delisted)
+    rd = q.backtest_weights(p, Wd, capital=cap, price=pd_, lot=lot, benchmark=None, check_universe=False)
+    assert rd.holdings[10:31, 2].min() < 0 and rd.holdings[31:, 2].max() == 0 and rd.holdings[31:, 2].min() == 0, rd.holdings[28:40, 2]
     print(f"X5 positions are whole lots at the real price (equal to a loop); lot by ticker; no price keeps the position; capital 1e15 equals no rounding  PASS")
 
 

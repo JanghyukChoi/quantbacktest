@@ -141,7 +141,7 @@ r_open = q.backtest_portfolio(ex.at_prices(panel, "open"), factor)              
 |---|---|
 | Increasing a position needs `can_buy` and decreasing it needs `can_sell`, read on the execution day | A name locked at its upper limit has no sellers; one locked down has no buyers; a halted name has neither |
 | A blocked trade leaves the position as it was | You cannot get out of a name you cannot sell. The frozen weight is reported (`mean_stuck_weight`, `longest_freeze_days`) |
-| After a flagged delisting, and after `max_gap_days` (60) with no price at all, a position can be closed either way | The engines settle it (`delist_return`); refusing the exit froze 38% of one real short leg for ever |
+| After a flagged delisting, and after `max_gap_days` (60) with no price at all, a position can be closed either way | The engines settle it (`delist_return`); refusing the exit froze a large part of one real short leg for ever |
 | A name with a price but no volume stays frozen | A Korean trading suspension is exactly that. Its return is 0 here, which is **optimistic** if it ends in a delisting |
 | Whole-lot sizes need the **real** price level (`meta["raw_close"]` in the KRX and Tiingo panels) | A back-adjusted series has an arbitrary level and gives wrong share counts |
 | **No limit, lot size or minimum order ships with the library** | They differ by market and change by rule. You pass the ones you have checked |

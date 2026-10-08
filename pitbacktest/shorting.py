@@ -22,8 +22,8 @@ def shortable_from_bans(dates: pd.DatetimeIndex, tickers: pd.Index, bans, exempt
             exempt that day; anything not in the frame is not exempt).
 
     A partial ban (only some securities may be shorted again) is a ban for the others: pass the securities that may be shorted as
-    `exempt`. If you do not know them, do not pretend: treating the whole period as a full ban (no exempt) is the cautious choice
-    and the result is a lower bound on what a short-selling strategy could have done."""
+    `exempt`. If you do not know them, do not pretend: treating the whole period as a full ban (no exempt) is the cautious choice (no short is
+    assumed possible). It is not a lower bound on the result: when the short leg was losing money, a ban makes the result better."""
     dates = pd.DatetimeIndex(dates)
     banned = pd.Series(False, index=dates)
     for item in bans:

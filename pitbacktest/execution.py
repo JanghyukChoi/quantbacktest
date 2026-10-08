@@ -38,8 +38,8 @@ def tradability(panel: Panel, *, limit=None, tol: float = 0.01, halt_on_zero_vol
             under the limit. This is **conservative**: it also blocks days that reached the limit but traded freely before it.
     tol     in fractions, 0 <= tol < limit.
     max_gap_days  after this many consecutive days **without any price**, a position is treated as settled and can be closed either way
-            (None: never). An exchange settles a delisted contract and a vendor gap or a ticker that came back years later (one case
-            in the Binance cache is absent for 894 days and then trades again) is not a position you can hold through. A name with a price
+            (None: never). An exchange settles a delisted contract and a vendor gap or a ticker that came back years later (a contract
+            that was absent for years and then listed again, in the Binance cache) is not a position you can hold through. A name with a price
             but no volume (a Korean trading suspension) is not covered: that one really is frozen, for as long as the data says."""
     c = panel.close
     ok = c.notna()
@@ -118,7 +118,8 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
             capital: float | None = None, price: np.ndarray | None = None, lot=1.0, min_trade_value: float = 0.0):
     """The positions that result from asking for `target` row by row (row 0 is a build from cash).
 
-    Each day, per name: round the target to whole lots (when `capital` is given); skip the trade if its value is under `min_trade_value`;
+    Each day, per name: round the target to whole lots (when `capital` is given; `price` is read on the **same row** as the target, so pass the price of the day the
+    trade is done: `backtest_weights` shifts it by `entry_lag`); skip the trade if its value is under `min_trade_value`;
     skip it if it increases the position where `can_buy` is False, or decreases it where `can_sell` is False. A skipped trade leaves the
     position as it was the day before. A name with no price on a day (NaN) keeps its position.
     The weight is what the engines keep constant, so a day without a trade keeps the previous **weight**, not the previous share count: after the price moves, the
@@ -138,7 +139,9 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
         if use_lots:
             lt = lot[t] if isinstance(lot, np.ndarray) and lot.ndim == 2 else lot
             tgt = round_to_lots(tgt, capital, price[t], lt)
-            tgt = np.where(np.isfinite(tgt), tgt, prev)                      # no price: nothing to size, nothing to trade
+            # A flat target needs no price to carry out (a delisted name is simply closed); a non-flat target with no price cannot be sized, so the
+            # position stays.
+            tgt = np.where(target[t] == 0, 0.0, np.where(np.isfinite(tgt), tgt, prev))
             gap += float(np.abs(tgt - target[t]).sum())
         d = tgt - prev
         stay = np.zeros(N, dtype=bool)

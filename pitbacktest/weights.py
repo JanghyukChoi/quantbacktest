@@ -33,8 +33,9 @@ Execution (what can actually be traded)
   decreases one where it cannot be sold, does not happen and the position stays. They are read on the execution day, `lag` after the signal.
   `capital`, `price`, `lot`, `min_trade_value`: with `capital` given, each day's target is rounded to whole lots at the real prices and trades
   worth less than `min_trade_value` are skipped, so that a small account does not hold 0.3 of a share or trade a few dollars.
-  The returned `holdings` are the positions after all of that. If `panel.shortable` is given, opening or increasing a short in a security
-that cannot be sold short that day raises as well.
+  The returned `holdings` are the positions after all of that.
+If `panel.shortable` is given, opening or increasing a short in a security that cannot be sold short on the execution day (signal date +
+`entry_lag`) raises as well.
 """
 from __future__ import annotations
 
@@ -97,8 +98,8 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     net weights, so a name that is long from one signal and short from another (the two cancel) can show an increase when the
     short expires; holdings built from overlapping long and short tranches (`PortfolioResult.holdings`) can trip it, and
     then `check_universe=False` is the honest setting. Weights from an optimiser that nets positions are not affected.
-    `capital` (money, same currency as `price` and `ImpactModel.aum`), `price` (date x ticker **real** price level: a back-adjusted series has an
-    arbitrary level and gives wrong share counts), `lot` (shares per lot: a number, a Series by ticker or a date x ticker frame) and
+    `capital` (money, same currency as `price` and `ImpactModel.aum`), `price` (date x ticker **real** price level on the day of the row, as for the weights:
+    a back-adjusted series has an arbitrary level and gives wrong share counts; the engine sizes row t at `price` of day t + `entry_lag`, the day it is traded), `lot` (shares per lot: a number, a Series by ticker or a date x ticker frame) and
     `min_trade_value` (money) switch on whole-lot sizes; without `capital` they must be left alone.
     `check_shortable` (only with `panel.shortable`) raises if a short is opened or increased where the security cannot be sold short.
 
@@ -125,10 +126,10 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
         raise ValueError(f"{int(bad.sum())} positions opened or increased on securities that are not eligible that day "
                          f"(first: {panel.tickers[j]} on {panel.dates[i].date()}); the universe is point in time")
     if check_shortable and panel.shortable is not None:
-        nos = more_short & ~panel.shortable.to_numpy(bool)
+        nos = more_short & ~panel.shortable.shift(-panel.entry_lag, fill_value=True).to_numpy(bool)       # read on the execution day, like can_sell
         if nos.any():
             i, j = np.argwhere(nos)[0]
-            raise ValueError(f"{int(nos.sum())} short positions opened or increased on securities that cannot be sold short that day "
+            raise ValueError(f"{int(nos.sum())} short positions opened or increased on securities that cannot be sold short on the execution day "
                              f"(first: {panel.tickers[j]} on {panel.dates[i].date()}); see Panel.shortable")
     bo, so = exec_masks(panel)
     ex = None
@@ -141,9 +142,10 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
             raise ValueError("capital needs price, the real price level in the same currency (not a back-adjusted series)")
         if not (np.isfinite(min_trade_value) and min_trade_value >= 0):
             raise ValueError(f"min_trade_value must be at least 0, got {min_trade_value!r}")
-        px = price.reindex(index=panel.dates, columns=panel.tickers).to_numpy(float) if isinstance(price, pd.DataFrame) else None
-        if px is None:
+        if not isinstance(price, pd.DataFrame):
             raise ValueError("price must be a (date x ticker) frame")
+        # Row t of the weights is traded at close(t + lag), so it is sized at that day's price. The last `lag` rows have no such day: unpriced, kept.
+        px = price.reindex(index=panel.dates, columns=panel.tickers).shift(-panel.entry_lag).to_numpy(float)
         if isinstance(lot, pd.DataFrame):
             lot_ = lot.reindex(index=panel.dates, columns=panel.tickers).to_numpy(float)
         elif isinstance(lot, pd.Series):

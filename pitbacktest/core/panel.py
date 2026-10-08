@@ -48,7 +48,7 @@ class Panel:
     # Optional: futures funding (date x ticker, daily sum, positive means longs pay). Delisting flag (True on the last real bar). Notes for adapters.
     funding: pd.DataFrame | None = None
     delist_after: pd.DataFrame | None = None
-    # Optional: (date x ticker) bool, True where a security can be sold short that day (borrowable, and no short-selling ban). None means every
+    # Optional: (date x ticker) bool, True where a security can be sold short on the execution day (borrowable, and no short-selling ban). None means every
     # security can. A date or security missing from the frame counts as **not** shortable: an unknown is not permission.
     shortable: pd.DataFrame | None = None
     # Optional: (date x ticker) bool, False where a trade that increases (can_buy) or decreases (can_sell) a position cannot be done on that day

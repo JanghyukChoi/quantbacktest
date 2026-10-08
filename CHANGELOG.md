@@ -43,7 +43,7 @@
   after `max_gap_days` without any price). `execution.at_prices` trades at another price (the open). `backtest_weights` takes `capital`, `price`, `lot` and
   `min_trade_value` for whole-lot sizes. New metrics: `blocked_trades`, `blocked_turnover_share`, `mean_stuck_weight`, `longest_freeze_days`, `min_trade_skipped`,
   `mean_abs_rounding_gap`. The KRX and Tiingo panels record the real price level in `meta["raw_close"]`. No limit, lot size or minimum order ships with the library.
-  Found by running it on real data: refusing the exit from a delisted name froze 38% of one short leg for ever, and a Binance contract absent for 894 days kept a position alive.
+  Found by running it on real data: refusing the exit from a delisted name froze a large part of one real short leg for ever, and a Binance contract absent for years and then listed again kept a position alive.
 - **Changed**: `backtest_weights(check_universe=True)` now looks at long and short exposure separately, so turning a long into a smaller short in a name that is
   not eligible raises (it used to pass because the absolute weight shrank).
 - **Fixed (second independent review)**: `inject_delistings(hazard="illiquid")` raised `IndexError` on any panel whose first calendar year had 100 or more bars

@@ -223,8 +223,11 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
     rk = f.where(el).rank(axis=1, pct=True, na_option="keep")
-    el_s = el if panel.shortable is None else el & panel.shortable           # the short leg is chosen among securities that can be sold short
-    rk_s = rk if panel.shortable is None else f.where(el_s).rank(axis=1, pct=True, na_option="keep")
+    # The short leg is chosen among securities that can be sold short on the day the short is opened, the execution day (signal date + lag): a ban that
+    # starts on that day stops a short that would be opened then, though the signal was given the day before.
+    sh_exec = None if panel.shortable is None else panel.shortable.shift(-panel.entry_lag, fill_value=True)
+    el_s = el if sh_exec is None else el & sh_exec
+    rk_s = rk if sh_exec is None else f.where(el_s).rank(axis=1, pct=True, na_option="keep")
     fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     ev = el.values
 
