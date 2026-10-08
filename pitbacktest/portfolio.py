@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .core.costs import apply_turnover_cost, turnover
+from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
 from .core.panel import Panel
 
 ANN = 252
@@ -171,10 +171,25 @@ def _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, b
         raise ValueError("a boolean factor is not a ranking: pass a numeric score, or use backtest_event for a yes/no signal")
 
 
+def _side_label(v) -> float | str:
+    return float(v) if not isinstance(v, np.ndarray) else ("schedule" if v.shape[1] == 1 else "panel")
+
+
+def _side_config(buy_bp, sell_bp) -> dict:
+    """Ledger configuration of the side costs: left out when both are zero so that runs recorded without them keep their fingerprint."""
+    from .ledger import array_fingerprint
+    out = {}
+    for k, v in (("buy_bp", buy_bp), ("sell_bp", sell_bp)):
+        if v is None or (np.ndim(v) == 0 and float(v) == 0.0):
+            continue
+        out[k] = float(v) if np.ndim(v) == 0 else array_fingerprint(np.asarray(v, dtype=float))
+    return out
+
+
 def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
                        hold: int = 5, weighting: str = "equal",
-                       spread_bp=20.0, benchmark: str | None = "cap",
+                       spread_bp=20.0, buy_bp=0.0, sell_bp=0.0, benchmark: str | None = "cap",
                        grid: bool = True, funding: bool = True,
                        delist_return: float | None = None,
                        ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
@@ -186,6 +201,10 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     spread_bp   **Two units.** A scalar is a round-trip spread: each unit of weight traded pays spread_bp/2
                 (to use a one-way cost of c bp, pass 2*c). A (date x ticker) panel is a one-way cost in bp, multiplied
                 by the weight traded as it is. A scalar 20 equals a panel of 10 (pinned by tests/test_reconcile.py).
+    buy_bp, sell_bp  One-way cost per unit of weight **bought** / **sold**, in bp, charged on top of the spread; a float, a Series
+                indexed by date (a rate that changes over time, for example a transaction tax) or a (date x ticker) frame. A weight going
+                down is a sell, so opening a short pays `sell_bp` and covering it pays `buy_bp` (a sales tax is charged when a short is
+                opened). The rate is read on the signal date. A missing value raises: an unknown rate is not zero.
     benchmark   cap (market-cap weighted) | equal (equal weighted) | None
     funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
     ledger      pitbacktest.ledger.Ledger. If given, this run is recorded in it, so the number of trials reaches the deflated Sharpe.
@@ -194,27 +213,33 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                 None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
     """
     _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, benchmark)
+    bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
+    sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
     rk = f.where(el).rank(axis=1, pct=True, na_option="keep")
+    el_s = el if panel.shortable is None else el & panel.shortable           # the short leg is chosen among securities that can be sold short
+    rk_s = rk if panel.shortable is None else f.where(el_s).rank(axis=1, pct=True, na_option="keep")
     fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     ev = el.values
 
     def leg(q: float, top: bool) -> np.ndarray:
-        m = ((rk >= 1 - q) if top else (rk <= q)) & el
+        rk_, el_ = (rk, el) if top else (rk_s, el_s)
+        m = ((rk_ >= 1 - q) if top else (rk_ <= q)) & el_
         mv = m.values
         if weighting == "equal":
             w = mv.astype(float)
         elif weighting == "signal":
             w = np.where(mv, np.abs(np.nan_to_num(f.values, nan=0.0)), 0.0)
         else:  # rank
-            r = np.nan_to_num(rk.values, nan=0.0)
+            r = np.nan_to_num(rk_.values, nan=0.0)
             w = np.where(mv, (r - (1 - q)) if top else (q - r), 0.0)
         return _normalize(w)
 
     hl = _tranche(leg(long_q, True), hold)
     gross = (hl * fwd).sum(axis=1)
     cost = apply_turnover_cost(hl, spread_bp)
+    side = apply_side_cost(hl, bb, sb)
     turn = turnover(hl)
     fcost = (hl * fwdf).sum(axis=1)                     # longs pay a positive funding rate
     held = hl > 0
@@ -223,9 +248,11 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
         hs = _tranche(leg(short_q, False), hold)
         gross = gross - (hs * fwd).sum(axis=1)
         cost = cost + apply_turnover_cost(hs, spread_bp)
+        side = side + apply_side_cost(-hs, bb, sb)                  # a short is a negative weight: opening it is a sell
         turn = turn + turnover(hs)
         fcost = fcost - (hs * fwdf).sum(axis=1)         # shorts receive it
         held = held | (hs > 0)
+    cost = cost + side                                  # `cost_annual_bp` is every trading cost: spread and side costs
     net = gross - cost - fcost
 
     cut = len(panel.dates) - (panel.entry_lag + 1)
@@ -233,6 +260,9 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     m["turnover_daily"] = float(turn[:cut].mean())
     m["cost_annual_bp"] = float(cost[:cut].mean() * panel.periods_per_year * 1e4)
     m["gross_CAGR"] = metrics(gross[:cut], panel.dates, panel.periods_per_year)["CAGR"]
+    m["side_cost_annual_bp"] = float(side[:cut].mean() * panel.periods_per_year * 1e4)   # the part of cost_annual_bp from buy_bp and sell_bp
+    if panel.shortable is not None and short_q:
+        m["short_leg_empty_days"] = int((~(el_s.to_numpy(bool).any(axis=1)))[:cut].sum())   # no security could be sold short that day
     m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
     m["delist_events_held"] = int((held & hit_next)[:cut].sum())
     m["avg_positions"] = float((hl > 0).sum(axis=1)[(hl > 0).sum(axis=1) > 0].mean())
@@ -255,11 +285,11 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             for c in (0, 2, 5, 10, 20):
                 hl2 = _tranche(leg(long_q, True), h)
                 gr = (hl2 * fwd).sum(axis=1)
-                co = apply_turnover_cost(hl2, c) + (hl2 * fwdf).sum(axis=1)
+                co = apply_turnover_cost(hl2, c) + apply_side_cost(hl2, bb, sb) + (hl2 * fwdf).sum(axis=1)
                 if short_q:
                     hs2 = _tranche(leg(short_q, False), h)
                     gr = gr - (hs2 * fwd).sum(axis=1)
-                    co = co + apply_turnover_cost(hs2, c) - (hs2 * fwdf).sum(axis=1)
+                    co = co + apply_turnover_cost(hs2, c) + apply_side_cost(-hs2, bb, sb) - (hs2 * fwdf).sum(axis=1)
                 mm = metrics((gr - co)[:cut], panel.dates, panel.periods_per_year)
                 g[f"h{h}_c{c}"] = {"CAGR": mm["CAGR"], "Sharpe": mm["Sharpe"], "MDD": mm["MDD"]}
 
@@ -269,11 +299,13 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             "long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
             "spread_bp": spread_bp if np.isscalar(spread_bp) else array_fingerprint(spread_bp),
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
+            **_side_config(bb, sb),
             "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
               "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": panel.periods_per_year,
               "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp flat",
+              "buy_bp": _side_label(bb), "sell_bp": _side_label(sb),
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,

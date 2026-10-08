@@ -82,6 +82,61 @@ def apply_turnover_cost(holdings: np.ndarray, spread_bp: np.ndarray | float) -> 
     return cost
 
 
+def rate_schedule(dates: pd.DatetimeIndex, entries, name: str = "rate") -> pd.Series:
+    """A rate that changes on known effective dates, as a value for every date: each date takes the latest entry whose
+    effective date is on or before it. `entries` is a list of (effective_date, value). A date before the first entry raises,
+    because the rate is then unknown and a made-up rate (or 0) would hide that."""
+    if not len(entries):
+        raise ValueError(f"{name}: the schedule is empty")
+    s = pd.Series({pd.Timestamp(d): float(v) for d, v in entries}).sort_index()
+    out = s.reindex(dates, method="ffill")
+    if out.isna().any():
+        raise ValueError(f"{name}: no rate is known before {s.index[0].date()}, but the panel starts on {dates[0].date()} "
+                         f"(add an earlier entry or start the panel later)")
+    return out
+
+
+def side_cost_input(value, dates: pd.DatetimeIndex, tickers: pd.Index, name: str):
+    """Validate a one-way cost for one side of a trade (bp) and bring it to a form `apply_side_cost` can use: a float, a
+    (dates x 1) array (a Series indexed by date: a rate that changes over time) or a (dates x tickers) array. Unlike `spread_bp`, a
+    missing value raises instead of being replaced by a median: a rate you do not know is not a rate of zero."""
+    if value is None:
+        return 0.0
+    if isinstance(value, pd.DataFrame):
+        a = value.reindex(index=dates, columns=tickers).to_numpy(float)
+    elif isinstance(value, pd.Series):
+        if not isinstance(value.index, pd.DatetimeIndex):
+            raise ValueError(f"{name}: a Series must be indexed by date")
+        a = value.sort_index().reindex(dates, method="ffill").to_numpy(float).reshape(-1, 1)
+    else:
+        a = np.asarray(value, dtype=float)
+        if a.ndim == 0:
+            if not np.isfinite(a) or a < 0:
+                raise ValueError(f"{name} must be a finite number, not negative, got {value!r}")
+            return float(a)
+        if a.shape != (len(dates), len(tickers)):
+            raise ValueError(f"{name}: an array must have shape (dates, tickers) = {(len(dates), len(tickers))}, got {a.shape}")
+    if np.isnan(a).any():
+        raise ValueError(f"{name}: the value is unknown for some dates or securities (NaN, or a date before the first entry); "
+                         f"a missing cost is an error, not zero")
+    if np.isinf(a).any() or (a < 0).any():
+        raise ValueError(f"{name} must be finite and not negative (a negative cost would pay you for trading)")
+    return a
+
+
+def apply_side_cost(holdings: np.ndarray, buy_bp, sell_bp) -> np.ndarray:
+    """Daily cost of trades that depends on the side: `buy_bp` per unit of weight bought and `sell_bp` per unit sold (one-way,
+    bp, on top of the spread). A weight going up is a buy and a weight going down is a sell, so opening a short is a sell and
+    covering it a buy. The first row, a build from cash, is not charged (as for the spread). `buy_bp` and `sell_bp` are floats or
+    arrays from `side_cost_input`."""
+    d = np.diff(holdings, axis=0)
+    out = np.zeros(holdings.shape[0])
+    b = buy_bp[1:] if isinstance(buy_bp, np.ndarray) else buy_bp
+    s = sell_bp[1:] if isinstance(sell_bp, np.ndarray) else sell_bp
+    out[1:] = (np.maximum(d, 0.0) * b + np.maximum(-d, 0.0) * s).sum(axis=1) / 1e4
+    return out
+
+
 def turnover(holdings: np.ndarray) -> np.ndarray:
     """Daily one-way turnover."""
     t = np.zeros(holdings.shape[0])

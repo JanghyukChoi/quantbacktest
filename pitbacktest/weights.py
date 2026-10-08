@@ -13,6 +13,9 @@ Timing (the same as `backtest_portfolio`)
 Costs, all charged on the signal date of the trade, in return per unit of capital
   spread_bp   scalar: round-trip spread, each unit traded pays half of it. Panel (date x ticker): one-way cost in bp.
               The same units as `backtest_portfolio`.
+  buy_bp, sell_bp  one-way cost per unit of weight bought / sold (bp, on top of the spread): a float, a Series by date (a rate that
+              changes over time) or a (date x ticker) frame. A weight going down is a sell, so opening a short pays sell_bp. A missing
+              value raises. The same as in `backtest_portfolio`.
   borrow_bp   annual borrow fee in bp (scalar or panel) on the short market value, charged per period.
   impact      square-root law, per unit traded:  Y * sigma * sqrt(|trade| * AUM / ADV)
               sigma the trailing daily volatility, ADV the trailing average dollar volume, both known at the signal date.
@@ -22,7 +25,9 @@ Costs, all charged on the signal date of the trade, in return per unit of capita
 
 You cannot open or increase a position in a security that is not eligible that day: an optimiser that buys names outside
 the point-in-time universe is using information it should not have. A position already held may stay after the name leaves the
-universe until you reduce it.
+universe until you reduce it. Long and short exposure are checked separately, so turning a long into a smaller short in a name that is
+not eligible is an increase of its short and raises. If `panel.shortable` is given, opening or increasing a short in a security
+that cannot be sold short that day raises as well.
 """
 from __future__ import annotations
 
@@ -31,9 +36,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .core.costs import apply_turnover_cost
+from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
 from .core.panel import Panel
-from .portfolio import PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, metrics
+from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config,
+                        _side_label, metrics)
 
 
 @dataclass(frozen=True)
@@ -72,16 +78,17 @@ def _impact_cost(panel: Panel, H: np.ndarray, m: ImpactModel) -> tuple[np.ndarra
     return (trade * unit).sum(axis=1), np.where(trade > 0, part, np.nan)
 
 
-def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borrow_bp=0.0,
+def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_bp=0.0, sell_bp=0.0, borrow_bp=0.0,
                      impact: ImpactModel | None = None, funding: bool = True, delist_return: float | None = None,
                      benchmark: str | None = "cap", ledger=None, family: str = "default",
-                     name: str | None = None, check_universe: bool = True) -> PortfolioResult:
+                     name: str | None = None, check_universe: bool = True, check_shortable: bool = True) -> PortfolioResult:
     """Net returns of the weights you supply. See the module docstring for timing and costs.
 
-    `check_universe` raises if a position is opened or increased in a security that is not eligible that day. It looks at net
-    weights, so a name that is long from one signal and short from another (the two cancel) can show an increase when the
+    `check_universe` raises if a long or a short position is opened or increased in a security that is not eligible that day. It looks at
+    net weights, so a name that is long from one signal and short from another (the two cancel) can show an increase when the
     short expires; holdings built from overlapping long and short tranches (`PortfolioResult.holdings`) can trip it, and
     then `check_universe=False` is the honest setting. Weights from an optimiser that nets positions are not affected.
+    `check_shortable` (only with `panel.shortable`) raises if a short is opened or increased where the security cannot be sold short.
 
     Costs are charged on the **net** trade per security. `backtest_portfolio` charges its long and short legs as separate sleeves,
     so feeding it its own overlapping-tranche holdings can come out slightly cheaper here (a name long in one tranche and short in
@@ -89,6 +96,8 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borr
     _check_benchmark(benchmark)
     _check_cost(spread_bp, "spread_bp")
     _check_cost(borrow_bp, "borrow_bp")
+    bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
+    sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
     W = weights.reindex(index=panel.dates, columns=panel.tickers)
     raw = W.to_numpy(float)
     if np.isinf(raw).any():
@@ -96,15 +105,24 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borr
     n_nan = int(np.isnan(raw).sum())
     H = np.nan_to_num(raw, nan=0.0)
     prev = np.vstack([np.zeros((1, H.shape[1])), H[:-1]])
-    bad = (np.abs(H) > np.abs(prev) + 1e-12) & ~panel.eligible.to_numpy(bool)      # opening or increasing outside the universe
+    more_long = np.maximum(H, 0.0) > np.maximum(prev, 0.0) + 1e-12
+    more_short = np.maximum(-H, 0.0) > np.maximum(-prev, 0.0) + 1e-12
+    bad = (more_long | more_short) & ~panel.eligible.to_numpy(bool)               # opening or increasing outside the universe
     if check_universe and bad.any():
         i, j = np.argwhere(bad)[0]
         raise ValueError(f"{int(bad.sum())} positions opened or increased on securities that are not eligible that day "
                          f"(first: {panel.tickers[j]} on {panel.dates[i].date()}); the universe is point in time")
+    if check_shortable and panel.shortable is not None:
+        nos = more_short & ~panel.shortable.to_numpy(bool)
+        if nos.any():
+            i, j = np.argwhere(nos)[0]
+            raise ValueError(f"{int(nos.sum())} short positions opened or increased on securities that cannot be sold short that day "
+                             f"(first: {panel.tickers[j]} on {panel.dates[i].date()}); see Panel.shortable")
     fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     cut = len(panel.dates) - (panel.entry_lag + 1)
     gross = (H * fwd).sum(axis=1)
     spread = apply_turnover_cost(H, spread_bp)                          # the first row, a build from cash, is not charged
+    side = apply_side_cost(H, bb, sb)
     short = np.maximum(-H, 0.0)
     b = np.asarray(borrow_bp, float)
     borrow = (short * (b / 1e4 / panel.periods_per_year)).sum(axis=1) if b.ndim == 0 else \
@@ -113,7 +131,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borr
     imp, part = (np.zeros(len(H)), None)
     if impact is not None:
         imp, part = _impact_cost(panel, H, impact)
-    net = gross - spread - borrow - imp - fcost
+    net = gross - spread - side - borrow - imp - fcost
 
     ppy = panel.periods_per_year
     m = metrics(net[:cut], panel.dates, ppy)
@@ -121,6 +139,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borr
     tr[1:] = np.abs(np.diff(H, axis=0))
     m.update({"turnover_daily": float(0.5 * tr[:cut].sum(axis=1).mean()), "gross_CAGR": metrics(gross[:cut], panel.dates, ppy)["CAGR"],
               "spread_annual_bp": float(spread[:cut].mean() * ppy * 1e4), "borrow_annual_bp": float(borrow[:cut].mean() * ppy * 1e4),
+              "side_cost_annual_bp": float(side[:cut].mean() * ppy * 1e4),
               "impact_annual_bp": float(imp[:cut].mean() * ppy * 1e4), "funding_annual_bp": float(fcost[:cut].mean() * ppy * 1e4),
               "avg_gross_exposure": float(np.abs(H[:cut]).sum(axis=1).mean()), "avg_net_exposure": float(H[:cut].sum(axis=1).mean()),
               "delist_events_held": int(((H != 0) & hit_next)[:cut].sum()), "nan_weights_treated_as_zero": n_nan})
@@ -138,13 +157,14 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borr
     s = pd.Series(net[:cut], index=panel.dates[:cut])
     yr = s.groupby(s.index.year).apply(lambda g: float((1 + g).prod() - 1))
     spec = {"kind": "weights", "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": ppy,
-            "spread": "panel" if np.ndim(spread_bp) else f"{spread_bp}bp round trip", "borrow_bp": "panel" if b.ndim else float(b),
+            "spread": "panel" if np.ndim(spread_bp) else f"{spread_bp}bp round trip",
+            "buy_bp": _side_label(bb), "sell_bp": _side_label(sb), "borrow_bp": "panel" if b.ndim else float(b),
             "impact": None if impact is None else {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window,
                                                    "adv_window": impact.adv_window, "max_cost_bp": impact.max_cost_bp},
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return}
     if ledger is not None:
         from .ledger import array_fingerprint
-        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items()},
+        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp")}, **_side_config(bb, sb),
                                                     "spread_bp": spread_bp if np.ndim(spread_bp) == 0 else array_fingerprint(spread_bp),
                                                     "weights": array_fingerprint(H), "data": panel.fingerprint()})
     return PortfolioResult(spec=spec, metrics=m, benchmark=bench, excess=bexc, yearly={str(k): v for k, v in yr.items()}, grid=None,

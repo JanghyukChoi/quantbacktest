@@ -48,6 +48,9 @@ class Panel:
     # Optional: futures funding (date x ticker, daily sum, positive means longs pay). Delisting flag (True on the last real bar). Notes for adapters.
     funding: pd.DataFrame | None = None
     delist_after: pd.DataFrame | None = None
+    # Optional: (date x ticker) bool, True where a security can be sold short that day (borrowable, and no short-selling ban). None means every
+    # security can. A date or security missing from the frame counts as **not** shortable: an unknown is not permission.
+    shortable: pd.DataFrame | None = None
     meta: dict = field(default_factory=dict)
 
     # ---------------------------------------------------------------- construction and validation
@@ -68,6 +71,8 @@ class Panel:
         }
         if self.delist_after is not None:
             self.delist_after = self.delist_after.fillna(False).astype(bool)
+        if self.shortable is not None:
+            self.shortable = self.shortable.reindex(index=self.close.index, columns=self.close.columns).fillna(False).astype(bool)
         self.validate()
 
     def validate(self) -> None:
@@ -125,7 +130,7 @@ class Panel:
         The date index and the ticker names are not hashed: the same values in the same shape give the same fingerprint."""
         import hashlib
         h = hashlib.sha256()
-        mats = [(n, getattr(self, n)) for n in ("close", "eligible", "open", "high", "low", "volume", "mkt_cap", "funding", "delist_after")]
+        mats = [(n, getattr(self, n)) for n in ("close", "eligible", "open", "high", "low", "volume", "mkt_cap", "funding", "delist_after", "shortable")]
         mats += [(f"chars.{k}", self.chars[k]) for k in sorted(self.chars)]
         for name, v in mats:
             if v is not None:

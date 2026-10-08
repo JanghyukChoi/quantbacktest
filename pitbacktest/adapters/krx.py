@@ -157,6 +157,8 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
     life = (gap > reuse_gap_days).groupby(df["code"]).cumsum()
     df["sid"] = np.where(life == 0, df["code"], df["code"] + "#" + (life + 1).astype(str))
     names = df.drop_duplicates("sid", keep="last").set_index("sid")["name"].to_dict()
+    market_names = sorted(df["market"].dropna().unique())
+    df["_mk"] = df["market"].map({m: i for i, m in enumerate(market_names)}).astype("float64")
 
     def mat(c: str) -> pd.DataFrame:
         return df.pivot(index="date", columns="sid", values=c).sort_index()
@@ -186,7 +188,37 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
               volume=value / adj, mkt_cap=mat("mktcap"), market="KR", periods_per_year=245, entry_lag=entry_lag,
               delist_after=da)
     n = ok.sum(axis=1)
-    p.meta = {"securities": int(close.shape[1]), "delisted_in_panel": int(da.values.any(axis=0).sum()),
+    mk = mat("_mk").fillna(-1).astype("int8")                                # the market of each security on each day (-1: not listed)
+    p.meta = {"market_codes": {i: m for i, m in enumerate(market_names)}, "market_by_date": mk,
+              "securities": int(close.shape[1]), "delisted_in_panel": int(da.values.any(axis=0).sum()),
               "eligible_median": float(n[n > 0].median()), "first_day": str(close.index[0].date()),
               "last_day": str(close.index[-1].date()), "names": names}
     return p
+
+
+def sell_tax_panel(panel: Panel, schedule: dict) -> pd.DataFrame:
+    """(date x ticker) sell-side transaction tax in bp, for `backtest_portfolio(sell_bp=...)` and `backtest_weights(sell_bp=...)`.
+
+    schedule  {market name: [(effective_date, bp), ...]}, for example {"KOSPI": [("2025-01-01", 15.0), ...], "KOSDAQ": [...]}. Each
+              market's rate holds from its effective date until the next entry. The panel must come from `build_krx_panel`, which
+              records the market of every security **on every day** (a stock that moved from KOSDAQ to KOSPI changes rate the day it
+              moves). A date before the first entry of a market, or a market in the data that is missing from `schedule`, raises.
+
+    The library ships no rate table: the rates and their effective dates are law and change, so you pass the ones you have checked
+    against the National Tax Service or the statute. Include every levy that the seller pays (the securities transaction tax and, for
+    KOSPI, the rural development special tax). Days on which a security is not listed get the highest rate of that day, the cautious
+    choice, because a position held through a gap is still charged when it is sold."""
+    from ..core.costs import rate_schedule
+    mk, codes = panel.meta.get("market_by_date"), panel.meta.get("market_codes")
+    if mk is None or codes is None:
+        raise ValueError("this panel has no market information: build it with build_krx_panel")
+    unknown = sorted(set(codes.values()) - set(schedule))
+    if unknown:
+        raise ValueError(f"no tax schedule for market(s) {unknown}; give one for every market in the data ({sorted(codes.values())})")
+    rates = {m: rate_schedule(panel.dates, schedule[m], f"schedule[{m!r}]").to_numpy(float) for m in codes.values()}
+    arr = mk.reindex(index=panel.dates, columns=panel.tickers).to_numpy()
+    worst = np.max(np.vstack([rates[m] for m in codes.values()]), axis=0)
+    out = np.repeat(worst[:, None], arr.shape[1], axis=1)
+    for i, m in codes.items():
+        out = np.where(arr == i, rates[m][:, None], out)
+    return pd.DataFrame(out, index=panel.dates, columns=panel.tickers)
