@@ -179,14 +179,14 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     long_q      long quantile (top q), in (0, 1]. short_q is the short quantile; None means long-only (0 is refused).
     weighting   equal | signal (proportional to signal strength) | rank
     spread_bp   **Two units.** A scalar is a round-trip spread: each unit of weight traded pays spread_bp/2
-                            (to use a one-way cost of c bp, pass 2*c). A (date x ticker) panel is a one-way cost in bp, multiplied
-                            by the weight traded as it is. A scalar 20 equals a panel of 10 (pinned by tests/test_reconcile.py).
+                (to use a one-way cost of c bp, pass 2*c). A (date x ticker) panel is a one-way cost in bp, multiplied
+                by the weight traded as it is. A scalar 20 equals a panel of 10 (pinned by tests/test_reconcile.py).
     benchmark   cap (market-cap weighted) | equal (equal weighted) | None
     funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
     ledger      pitbacktest.ledger.Ledger. If given, this run is recorded in it, so the number of trials reaches the deflated Sharpe.
     family      name that groups runs of one research question in the ledger. name labels this trial (the same label with other settings is another trial).
     delist_return  assumed return on the day **after** the last real bar of a security flagged in panel.delist_after.
-                            None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
+                None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
     """
     _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, benchmark)
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
