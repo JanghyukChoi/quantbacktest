@@ -274,6 +274,10 @@ symbol, with no error. See `docs/survivorship.md`.
 
 Every test uses data where the right answer is known, so none of them needs a network or real prices.
 
+A second kind of check runs the engines on real data in three markets: `python docs/market_validation.py all` (needs the local caches; about 15 minutes, one market at a time) writes
+`docs/market_validation.md`. It checks the method (a shuffled factor is rejected about as often as claimed, a perfect-foresight factor explodes and the day before entry does not pay, costs lower
+the Sharpe, runs repeat to the last bit, the realism options equal the plain result when they have nothing to do) and reports no strategy's performance.
+
 ```bash
 python tests/test_synthetic.py      # core engine: look-ahead, neutralisation, base rates (10 tests)
 python tests/test_annualization.py  # 252 versus 365 days

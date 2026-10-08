@@ -63,6 +63,9 @@
   `meta["suspect_returns"]` and `build_krx_panel(drop_suspect_above=1.0)` can cut them; the default is unchanged so earlier results reproduce. None of the repository's strategies held such a
   name. The first measurement of suspension outcomes was distorted by exactly this: one false jump made the mean look like zero (+29,948% in one day; +15,285% over the whole suspension-to-delisting episode in the uncleaned panel).
   In the whole cache 38 daily returns beyond +-100% are listed (14 right after zero or missing volume); 29 of them, 10 after zero volume, since June 2015.
+- **One validation on real data in three markets.** `docs/market_validation.py` runs the same checks on KRX, the US Tiingo sample and Binance USDT-M (shuffled-factor calibration, timing canaries,
+  cost monotonicity, determinism, identities of the realism options with plain results, realism metrics, data sanity) and writes `docs/market_validation.md`; the exit code is non-zero if a check
+  fails. Method only: no factor's performance is reported. All checks pass at the commit it names.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.

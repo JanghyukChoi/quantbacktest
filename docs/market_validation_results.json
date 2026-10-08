@@ -1,0 +1,299 @@
+[
+ {
+  "market": "krx",
+  "label": "KRX 2016- (price limit 30% assumed)",
+  "shape": [
+   2637,
+   3268
+  ],
+  "periods_per_year": 245,
+  "checks": [
+   {
+    "name": "V1 null: Sharpe intervals that exclude 0",
+    "ok": true,
+    "detail": "2 of 40 (band 0 to 8)"
+   },
+   {
+    "name": "V1 null: mean Sharpe near 0",
+    "ok": true,
+    "detail": "mean +0.041, standard error 0.050"
+   },
+   {
+    "name": "V2 timing: perfect foresight explodes",
+    "ok": true,
+    "detail": "Sharpe 64.1"
+   },
+   {
+    "name": "V2 timing: the day before entry does not pay at lag 1",
+    "ok": true,
+    "detail": "Sharpe -0.28"
+   },
+   {
+    "name": "V2 timing: the same signal pays at lag 0",
+    "ok": true,
+    "detail": "Sharpe 64.2"
+   },
+   {
+    "name": "V3 costs: Sharpe falls as the spread rises",
+    "ok": true,
+    "detail": "+0.61 > +0.10 > -0.92 > -2.45"
+   },
+   {
+    "name": "V4 determinism: two runs are identical",
+    "ok": true,
+    "detail": "net returns equal to the last bit"
+   },
+   {
+    "name": "V4 determinism: the data fingerprint is stable",
+    "ok": true,
+    "detail": "0da9ff114b81e266"
+   },
+   {
+    "name": "V5 identities: all-True masks, an idle gross cap and no freeze option equal the plain result",
+    "ok": true,
+    "detail": "max difference 0.0e+00"
+   },
+   {
+    "name": "V6 realism: masks, markdown and gross cap run with finite metrics",
+    "ok": true,
+    "detail": "blocked share of turnover 15.012%, mean stuck weight 0.1089, longest freeze 1303 days"
+   },
+   {
+    "name": "V6 realism: the gross cap never raises the gross exposure",
+    "ok": true,
+    "detail": "1.805 -> 1.714"
+   },
+   {
+    "name": "V6 realism: a markdown never adds return",
+    "ok": true,
+    "detail": "-145 bp a year, 138 events"
+   },
+   {
+    "name": "V6 realism: trading at the open runs and differs from the close",
+    "ok": true,
+    "detail": "open and close results differ"
+   },
+   {
+    "name": "V7 data: no duplicated dates or tickers, panel not empty",
+    "ok": true,
+    "detail": "2637 dates x 3268 tickers"
+   },
+   {
+    "name": "V7 data: prices are positive and returns are finite",
+    "ok": true,
+    "detail": "no zero or negative price, no infinite return"
+   },
+   {
+    "name": "V7 data: the cleaned KRX series has no daily return beyond +100%",
+    "ok": true,
+    "detail": "0 left; 23 were listed as suspect in this panel's raw chain, 5 of them after zero or missing volume"
+   }
+  ],
+  "numbers": {
+   "null_rejections": 2,
+   "blocked_buy_share_of_eligible": 0.002088591071273127,
+   "blocked_turnover_share": 0.15012298580576178,
+   "mean_stuck_weight": 0.10886083435234731,
+   "longest_freeze_days": 1303,
+   "gross_without_cap": 1.8051634929799834,
+   "gross_with_cap": 1.7135854285508538,
+   "returns_beyond_100pct": 0,
+   "delist_flags": 502
+  },
+  "seconds": 304,
+  "passed": true
+ },
+ {
+  "market": "us",
+  "label": "US Tiingo sample 2013- (close only, 466 tickers)",
+  "shape": [
+   3461,
+   473
+  ],
+  "periods_per_year": 252,
+  "checks": [
+   {
+    "name": "V1 null: Sharpe intervals that exclude 0",
+    "ok": true,
+    "detail": "1 of 40 (band 0 to 8)"
+   },
+   {
+    "name": "V1 null: mean Sharpe near 0",
+    "ok": true,
+    "detail": "mean -0.062, standard error 0.043"
+   },
+   {
+    "name": "V2 timing: perfect foresight explodes",
+    "ok": true,
+    "detail": "Sharpe 38.4"
+   },
+   {
+    "name": "V2 timing: the day before entry does not pay at lag 1",
+    "ok": true,
+    "detail": "Sharpe -0.34"
+   },
+   {
+    "name": "V2 timing: the same signal pays at lag 0",
+    "ok": true,
+    "detail": "Sharpe 38.6"
+   },
+   {
+    "name": "V3 costs: Sharpe falls as the spread rises",
+    "ok": true,
+    "detail": "+0.56 > +0.16 > -0.65 > -1.86"
+   },
+   {
+    "name": "V4 determinism: two runs are identical",
+    "ok": true,
+    "detail": "net returns equal to the last bit"
+   },
+   {
+    "name": "V4 determinism: the data fingerprint is stable",
+    "ok": true,
+    "detail": "171191d130c38f8a"
+   },
+   {
+    "name": "V5 identities: all-True masks, an idle gross cap and no freeze option equal the plain result",
+    "ok": true,
+    "detail": "max difference 0.0e+00"
+   },
+   {
+    "name": "V6 realism: masks, markdown and gross cap run with finite metrics",
+    "ok": true,
+    "detail": "blocked share of turnover 0.570%, mean stuck weight 0.0035, longest freeze 206 days"
+   },
+   {
+    "name": "V6 realism: the gross cap never raises the gross exposure",
+    "ok": true,
+    "detail": "1.720 -> 1.717"
+   },
+   {
+    "name": "V6 realism: a markdown never adds return",
+    "ok": true,
+    "detail": "-7 bp a year, 2 events"
+   },
+   {
+    "name": "V7 data: no duplicated dates or tickers, panel not empty",
+    "ok": true,
+    "detail": "3461 dates x 473 tickers"
+   },
+   {
+    "name": "V7 data: prices are positive and returns are finite",
+    "ok": true,
+    "detail": "no zero or negative price, no infinite return"
+   }
+  ],
+  "numbers": {
+   "null_rejections": 1,
+   "blocked_buy_share_of_eligible": 0.0,
+   "blocked_turnover_share": 0.00569595662470947,
+   "mean_stuck_weight": 0.003452905633023034,
+   "longest_freeze_days": 206,
+   "gross_without_cap": 1.7195884125690812,
+   "gross_with_cap": 1.7166723005389026,
+   "returns_beyond_100pct": 234,
+   "delist_flags": 170
+  },
+  "seconds": 31,
+  "passed": true
+ },
+ {
+  "market": "crypto",
+  "label": "Binance USDT-M 2021-",
+  "shape": [
+   2105,
+   893
+  ],
+  "periods_per_year": 365,
+  "checks": [
+   {
+    "name": "V1 null: Sharpe intervals that exclude 0",
+    "ok": true,
+    "detail": "3 of 40 (band 0 to 8)"
+   },
+   {
+    "name": "V1 null: mean Sharpe near 0",
+    "ok": true,
+    "detail": "mean +0.138, standard error 0.060"
+   },
+   {
+    "name": "V2 timing: perfect foresight explodes",
+    "ok": true,
+    "detail": "Sharpe 46.7"
+   },
+   {
+    "name": "V2 timing: the day before entry does not pay at lag 1",
+    "ok": true,
+    "detail": "Sharpe -0.30"
+   },
+   {
+    "name": "V2 timing: the same signal pays at lag 0",
+    "ok": true,
+    "detail": "Sharpe 46.6"
+   },
+   {
+    "name": "V3 costs: Sharpe falls as the spread rises",
+    "ok": true,
+    "detail": "-0.58 > -0.92 > -1.58 > -2.57"
+   },
+   {
+    "name": "V4 determinism: two runs are identical",
+    "ok": true,
+    "detail": "net returns equal to the last bit"
+   },
+   {
+    "name": "V4 determinism: the data fingerprint is stable",
+    "ok": true,
+    "detail": "78ea8b5d976b31dd"
+   },
+   {
+    "name": "V5 identities: all-True masks, an idle gross cap and no freeze option equal the plain result",
+    "ok": true,
+    "detail": "max difference 0.0e+00"
+   },
+   {
+    "name": "V6 realism: masks, markdown and gross cap run with finite metrics",
+    "ok": true,
+    "detail": "blocked share of turnover 0.590%, mean stuck weight 0.0037, longest freeze 60 days"
+   },
+   {
+    "name": "V6 realism: the gross cap never raises the gross exposure",
+    "ok": true,
+    "detail": "1.719 -> 1.717"
+   },
+   {
+    "name": "V6 realism: a markdown never adds return",
+    "ok": true,
+    "detail": "+0 bp a year, 0 events"
+   },
+   {
+    "name": "V6 realism: trading at the open runs and differs from the close",
+    "ok": true,
+    "detail": "open and close results differ"
+   },
+   {
+    "name": "V7 data: no duplicated dates or tickers, panel not empty",
+    "ok": true,
+    "detail": "2105 dates x 893 tickers"
+   },
+   {
+    "name": "V7 data: prices are positive and returns are finite",
+    "ok": true,
+    "detail": "no zero or negative price, no infinite return"
+   }
+  ],
+  "numbers": {
+   "null_rejections": 3,
+   "blocked_buy_share_of_eligible": 0.0,
+   "blocked_turnover_share": 0.005895326288924334,
+   "mean_stuck_weight": 0.003671458403946123,
+   "longest_freeze_days": 60,
+   "gross_without_cap": 1.7192868496560088,
+   "gross_with_cap": 1.7165252146589673,
+   "returns_beyond_100pct": 150,
+   "delist_flags": 372
+  },
+  "seconds": 36,
+  "passed": true
+ }
+]
