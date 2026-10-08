@@ -133,8 +133,11 @@ def test_shortable_in_portfolio():
     e = q.backtest_portfolio(none, f, **kw)
     lo = q.backtest_portfolio(p, f, **{**kw, "short_q": None})
     assert np.array_equal(e.net_returns.to_numpy(), lo.net_returns.to_numpy())               # no short possible: the long leg alone
-    assert e.metrics["short_leg_empty_days"] == len(e.net_returns) and "short_leg_empty_days" not in base.metrics
+    assert e.metrics["short_leg_empty_days"] == len(e.net_returns) - int((~p.eligible.any(axis=1)).iloc[:len(e.net_returns)].sum()) and "short_leg_empty_days" not in base.metrics
     assert not (e.holdings < 0).any()
+    warm = p.eligible.copy(); warm.iloc[:20] = False                                         # no eligible names at all in a warm-up stretch
+    w0 = q.backtest_portfolio(replace(p, eligible=warm, shortable=none.shortable), f, **kw)
+    assert w0.metrics["short_leg_empty_days"] == len(w0.net_returns) - 20                   # those days are not blamed on the restriction
     print(f"S4 the short leg is picked among shortable names (day {t}: {len(expect)} names as in a loop); none shortable gives the long-only result  PASS")
 
 

@@ -262,7 +262,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     m["gross_CAGR"] = metrics(gross[:cut], panel.dates, panel.periods_per_year)["CAGR"]
     m["side_cost_annual_bp"] = float(side[:cut].mean() * panel.periods_per_year * 1e4)   # the part of cost_annual_bp from buy_bp and sell_bp
     if panel.shortable is not None and short_q:
-        m["short_leg_empty_days"] = int((~(el_s.to_numpy(bool).any(axis=1)))[:cut].sum())   # no security could be sold short that day
+        m["short_leg_empty_days"] = int((el.to_numpy(bool).any(axis=1) & ~el_s.to_numpy(bool).any(axis=1))[:cut].sum())   # eligible names exist, none can be sold short
     m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
     m["delist_events_held"] = int((held & hit_next)[:cut].sum())
     m["avg_positions"] = float((hl > 0).sum(axis=1)[(hl > 0).sum(axis=1) > 0].mean())
