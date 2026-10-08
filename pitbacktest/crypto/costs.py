@@ -19,7 +19,7 @@ from ..core.costs import corwin_schultz
 
 def liquidity_cost_bp(panel, *, taker_fee_bp: float = 5.0, half_spread_bp: float = 2.0, window: int = 30,
                       thin_usd: float = 1e8, thin_extra_bp: float = 5.0,
-                      spread_estimator: str = "fixed") -> pd.DataFrame:
+                      spread_estimator: str = "fixed", tick_size=None) -> pd.DataFrame:
     """(date x ticker) one-way cost in bp = taker fee + half spread (+ a penalty for thin contracts).
 
     spread_estimator
@@ -32,6 +32,13 @@ def liquidity_cost_bp(panel, *, taker_fee_bp: float = 5.0, half_spread_bp: float
                         by jumps and volatility clustering, which the estimator's assumptions do not cover. It is
                         kept only to reproduce the preregistered run.
 
+      "tick"            half of one price tick as a share of the price: `0.5 * tick_size / close * 1e4` bp (`tick_size` is a Series by ticker,
+                        for example `ArchiveStore.symbol_rules()["tick_size"]`; a ticker without one raises). Measured against the order book
+                        (docs/crypto_spread_check.md): the quoted half spread was one tick for 9 of 12 sampled contracts (0.8 to 1.25 times the
+                        prediction). The 3 others were 10, 10 and 100 times wider: the exchange has cut their tick since, and `tick_size` is
+                        today's value, so there it is a **floor**. It is the cost of a small order at the best quote, not of a large one:
+                        impact is not in it.
+
     Contracts whose trailing turnover is below `thin_usd` pay `thin_extra_bp` more, a blunt stand-in for impact.
     Uses only data up to day t."""
     adv = panel.adv(window)
@@ -41,6 +48,14 @@ def liquidity_cost_bp(panel, *, taker_fee_bp: float = 5.0, half_spread_bp: float
                       stacklevel=2)
         cs = corwin_schultz(panel.high, panel.low)
         half = (cs.rolling(window, min_periods=10).median() * 0.5 * 1e4).clip(lower=1.0)
+    elif spread_estimator == "tick":
+        if tick_size is None:
+            raise ValueError("spread_estimator='tick' needs tick_size, a Series by ticker")
+        tk = pd.Series(tick_size, dtype=float).reindex(panel.tickers)
+        if tk.isna().any() or (tk <= 0).any():
+            raise ValueError(f"tick_size is missing or not positive for {int((tk.isna() | (tk <= 0)).sum())} tickers "
+                             f"(first: {list(tk.index[(tk.isna() | (tk <= 0)).to_numpy()][:3])}); a delisted contract has none in the exchange rules")
+        half = 0.5 * tk / panel.close * 1e4
     elif spread_estimator == "fixed":
         half = half_spread_bp
     else:

@@ -4,6 +4,7 @@ R1 parse      step, minimum quantity, minimum order value, tick and dates come o
 R2 cache      the second call makes no request and carries the day it was fetched; refresh asks again
 R3 rules      lot is the larger of the step and the minimum quantity; an unknown ticker raises, or is NaN so it can be left out
 R4 engine     `backtest_weights` takes a minimum order value per ticker: each ticker skips the trades under its own value
+R5 tick       the tick spread estimator: fee + half a tick over the price; a missing tick raises
 """
 from __future__ import annotations
 import json, sys, tempfile
@@ -93,7 +94,27 @@ def test_engine_takes_a_minimum_per_ticker():
     print("R4 a minimum order value per ticker: each ticker skips only trades under its own value; zeros equal none; an unknown value raises  PASS")
 
 
+def test_tick_spread():
+    from pitbacktest.crypto.costs import liquidity_cost_bp
+    p, _ = _panel(seed=22, T=80, N=12)
+    tick = pd.Series([0.01, 0.1, 1.0, 0.0001, 0.5, 0.05] * 2, index=p.tickers)
+    c = liquidity_cost_bp(p, spread_estimator="tick", tick_size=tick, taker_fee_bp=5.0, thin_extra_bp=0.0)
+    ref = 5.0 + 0.5 * tick.to_numpy()[None, :] / p.close.to_numpy() * 1e4                            # fee + half a tick over the price, in bp
+    assert np.allclose(c.to_numpy(), ref, rtol=1e-12), np.abs(c.to_numpy() - ref).max()
+    px = 100.0; one = 0.5 * 0.01 / px * 1e4
+    assert abs(one - 0.5) < 1e-12                                                                    # known answer: tick 0.01 on 100 is half a basis point
+    for bad in (None, tick.iloc[:3], tick.where(tick > 0.001)):
+        try:
+            liquidity_cost_bp(p, spread_estimator="tick", tick_size=bad)
+        except ValueError as e:
+            assert "tick" in str(e)
+        else:
+            raise AssertionError("a missing tick must raise")
+    print("R5 the tick spread estimator equals half a tick over the price, adds the fee, and refuses missing or unknown ticks  PASS")
+
+
 if __name__ == "__main__":
+    test_tick_spread()
     test_parse_cache_and_rules()
     test_engine_takes_a_minimum_per_ticker()
     print("symbol rule tests: all passed")

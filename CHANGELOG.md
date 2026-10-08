@@ -47,6 +47,10 @@
 - **Binance trading rules.** `ArchiveStore.symbol_rules()` reads the quantity step, minimum quantity and minimum order value of each contract from the exchange-info
   endpoint (no key; today's values only, delisted contracts absent) and `execution_rules()` turns them into `lot` and `min_trade_value` for `backtest_weights`, which now
   takes `min_trade_value` per ticker. An unknown ticker raises or is NaN: no rule is invented.
+- **Crypto spread against the order book.** Measured the quoted half spread of 12 USDT-M contracts (36 contract-days, 105 million quote updates) from the public `bookTicker` files
+  (`docs/crypto_spread_check.md`, `docs/crypto_spread_probe.py`). The default flat 2 bp (7 bp for thin contracts) was far above the quote for the liquid ones (100 to 200 times for BTC and
+  ETH) and above the default for only 1 of 12. The quote is one price tick for 9 of 12; for the others the exchange has cut the tick since (10, 10 and 100 times). New
+  `liquidity_cost_bp(spread_estimator="tick", tick_size=...)`. The default is unchanged because the preregistered study used it.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.
