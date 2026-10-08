@@ -121,7 +121,8 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
     Each day, per name: round the target to whole lots (when `capital` is given); skip the trade if its value is under `min_trade_value`;
     skip it if it increases the position where `can_buy` is False, or decreases it where `can_sell` is False. A skipped trade leaves the
     position as it was the day before. A name with no price on a day (NaN) keeps its position.
-    Returns (positions, stats). `mean_stuck_weight` is the average over days of the weight held where the target said otherwise because a trade was
+    The weight is what the engines keep constant, so a day without a trade keeps the previous **weight**, not the previous share count: after the price moves, the
+    shares it implies need not be a multiple of the lot (a halted name does not move, so there it is). Returns (positions, stats). `mean_stuck_weight` is the average over days of the weight held where the target said otherwise because a trade was
     blocked; `longest_freeze_days` the longest run of consecutive days a wanted trade in one name was blocked. A position that cannot be traded
     does not free the capital it ties up: the engines still add new targets on top of it."""
     T, N = target.shape
