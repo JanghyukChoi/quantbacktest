@@ -104,6 +104,7 @@ def freeze_hits(panel: Panel, freeze_days: int | None) -> np.ndarray | None:
 
 
 def check_freeze_return(freeze_return: float) -> float:
+    """`freeze_return` as a float, or ValueError unless it is between -1 and 0 (a markdown is never a gain)."""
     if not (np.isfinite(freeze_return) and -1.0 <= freeze_return <= 0.0):
         raise ValueError(f"freeze_return must be between -1 and 0 (a markdown is never a gain), got {freeze_return!r}")
     return float(freeze_return)
