@@ -98,11 +98,13 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
                    cost_bp: float = 20.0,
                    neutralize_check: bool = True,
                    gate_config: GateConfig | None = None,
-                   null_threshold: float | None = None) -> EventResult:
+                   null_threshold: float | None = None,
+                   delist_return: float | None = None) -> EventResult:
     """Event-signal test.
 
     signal   bool or 0/1 matrix (date x ticker). True = fires that day.
     cost_bp  round-trip trading cost. If per-security measured costs exist, use the spread panel on the portfolio side.
+    delist_return  return assumed on the day after a security's last bar when it is flagged in panel.delist_after (None: carried at its last price).
 
     With the neutralisation test on (the default) the contribution after controls is re-measured with a **dummy regression**.
     An event signal is not a continuous factor, so it is read through a dummy coefficient and not through residuals.
@@ -117,7 +119,7 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
     cost = cost_bp / 1e4
 
     lookahead = panel.assert_no_lookahead(sig.astype(float), h=max(horizons))
-    cums = {h: panel.forward(h).values.astype(np.float64) for h in horizons}
+    cums = {h: panel.forward(h, delist_return).values.astype(np.float64) for h in horizons}
 
     per_h = {}
     for h in horizons:
@@ -143,7 +145,7 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
             f"median universe)) names, so a short sample or a rarely firing signal leaves few days.", stacklevel=2)
 
     from .core.estimators import decile_profile
-    dec = decile_profile(sig.astype(float), panel.forward(best_h), panel.eligible,
+    dec = decile_profile(sig.astype(float), panel.forward(best_h, delist_return), panel.eligible,
                          lag=max(best_h, 21))
     struct = fire_structure(fire, panel.dates, panel.tickers)
     cfg = gate_config or GateConfig(null_threshold=null_threshold)

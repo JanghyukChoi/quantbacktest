@@ -20,8 +20,8 @@ What is different:
   original results stayed, an amendment explained it, and both are reported.
 - **Overfitting is counted, not recalled.** Deflated Sharpe, PBO and a permutation test, plus a hash-chained trial ledger that records
   every run so the number of variants you tried cannot be understated from memory.
-- **One timing convention, asserted in code**, point-in-time universes, firm-characteristic controls by default, and reporting that
-  refuses to show an impressive raw number before the controls are applied.
+- **One timing convention**, point-in-time universes, and firm-characteristic controls by default: the test statistic that decides `screen`'s first
+  gate is computed with controls, and the factor is re-tested after neutralising it, with the uncontrolled figures labelled beside them.
 - **Costs and capacity:** spread, borrow and square-root market impact for weights you supply, a capacity curve, and an intraday layer
   (1-minute Binance bars) that shows how fast an edge decays with latency and at what cost it stops paying.
 - **Checked against independent implementations**, not just against itself: the portfolio engine equals a plain-loop reimplementation to
@@ -56,7 +56,7 @@ free of survivorship bias.
 |---|---|
 | One timing convention, checked by `assert_timing()` | An entry that is one day late (or early) silently changes results, most of all for 1-day mean reversion |
 | Firm-characteristic controls are the default (size, book-to-market, momentum, ROA, asset growth) | Without them a "new alpha" is often a known factor in disguise. It warns when characteristics are missing |
-| Uncontrolled results are returned but left out of the default summary | Reporting only after controls stops a large raw number from setting expectations |
+| `screen` decides on a t-statistic computed **with controls** and re-tests after neutralising; uncontrolled figures (`excess_bp`, `coef_bp_raw`) sit beside them, labelled | A large raw number should not be the thing that passes a factor |
 | Win rate is reported with its base rate: `lift = win rate - base rate` | With a longer holding period both rise together; only the lift says anything about the signal |
 | Mean and median are both reported (`skew_warning`) | If the signs differ, a few big winners hide many small losses. Fine for a portfolio, bad for an alert |
 | Multiple-testing thresholds come from a shuffled null, not Bonferroni | Bonferroni ignores the correlation between tests |
@@ -237,6 +237,7 @@ python tests/test_krx.py            # Korea: delisted names kept, split-day retu
 python tests/test_equity.py         # equity tools: delisting scenarios (known answer), coverage, survivors_only, long-format checks
 python tests/test_reconcile.py      # the engine against an independent loop implementation (agrees to 1e-17), and DSR/permutation false-positive rates on noise
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
+python tests/test_delisting_and_guards.py # a window that runs into a delisting keeps its loss; screen and backtest_event count delisted trades; intraday and cost guards
 python tests/test_argument_checks.py # bad arguments raise a clear error instead of quietly running something else
 python tests/test_costs_events.py    # spread estimators, crypto costs, event signals and their neutralisation, FM with missing returns, panel checks
 python tests/test_yfinance_adapter.py # the free-data adapter against a fake yfinance: when it warns about survivorship, market-cap paths, errors
@@ -265,6 +266,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | E1 to E6 | injecting a 5% yearly delisting rate at -30% lowers an equal-weight long book by 1.5% a year (the known answer), coverage counts, scenarios, strict long-format input |
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
+| DG1 to DG3 | `Panel.forward` keeps the loss of a trade that runs into a delisting (hand-computed, with and without `delist_return`), `backtest_event` and `screen` count those trades, and the intraday, cost, hazard and short-panel guards hold. Ten planted removals are all caught |
 | AC1 to AC4 | bad arguments stop with a clear error (mistyped weighting or benchmark, quantiles outside (0, 1], short_q=0, hold below 1, a negative cost that used to turn a Sharpe of -1.01 into +0.96, a boolean factor, horizons, an impact model that makes no sense), and the `screen` default of 20 shuffled-null repetitions, since two repetitions give a threshold biased far below pure noise. Twenty planted removals are all caught |
 | CE1 to CE11 | Roll recovers a 2 cent spread, Corwin-Schultz a 40 bp one, the spread model its coefficients, the crypto cost model is exact, an event signal that only echoes a control keeps -8% of its effect after controls while a real 100 bp effect keeps 102%, Fama-MacBeth with missing returns equals a per-day least squares, the paired difference, panel validation and the point-in-time mask follow their documentation |
 | Y1 to Y5 | the yfinance adapter warns that it is not point in time every time, warns about survivors-only only with 30+ tickers none of which end early, reports partial market-cap coverage with counts, and refuses nothing-eligible and one-ticker panels |

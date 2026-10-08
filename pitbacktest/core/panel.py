@@ -100,15 +100,23 @@ class Panel:
         """Daily return close(t)/close(t-1) - 1."""
         return self.close.pct_change(fill_method=None)
 
-    def forward(self, h: int) -> pd.DataFrame:
-        """Cumulative future return over h days for a signal at t.
+    def forward(self, h: int, delist_return: float | None = None) -> pd.DataFrame:
+        """Return from close(t + lag) to close(t + lag + h) for a signal at t: a plain price ratio, NaN when either price is missing.
 
-        entry_lag=1 enters at close(t+1) and exits at close(t+1+h).
-        Accumulated in logs and converted back, so a missing value in between does not break the sum.
-        """
+        A security flagged in `delist_after` is carried at its last price after its last bar (as cash), or at `last price x (1 + delist_return)`
+        when `delist_return` is given, so a holding period that runs into a delisting keeps its result instead of dropping out. Without that
+        the statistics of `screen` and `backtest_event` would leave out exactly the trades that ended in a delisting. A security that is only
+        missing for some days (a halt) still gives NaN when an end price is missing. Compare `analytics.forward_returns`, which compounds daily
+        returns and treats a missing price as a return of 0."""
         lag = self.entry_lag
-        entry = self.close.shift(-lag)
-        exit_ = self.close.shift(-(lag + h))
+        px = self.close
+        if self.delist_after is not None and bool(np.asarray(self.delist_after.values).any()):
+            da = self.delist_after.reindex(index=px.index, columns=px.columns).fillna(False).astype(bool).astype(int)
+            gone = (da.cumsum() - da) > 0                                   # strictly after the security's last bar
+            carried = px.ffill() * (1.0 + (0.0 if delist_return is None else float(delist_return)))
+            px = px.where(~gone, carried)
+        entry = px.shift(-lag)
+        exit_ = px.shift(-(lag + h))
         return (exit_ / entry - 1.0).astype(np.float32)
 
     def fingerprint(self) -> str:

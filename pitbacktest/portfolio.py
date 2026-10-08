@@ -145,6 +145,8 @@ def _benchmark_returns(panel: Panel, fwd: np.ndarray, kind: str) -> np.ndarray:
 def _check_cost(value, name: str) -> None:
     """A cost must be a finite, non-negative number (or an array of them). A negative cost would pay you to trade."""
     a = np.asarray(value, dtype=float)
+    if a.ndim == 0 and not np.isfinite(a):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
     if a.size and (np.nanmin(a, initial=np.inf) < 0 or np.isinf(a).any()):
         raise ValueError(f"{name} must be finite and not negative (a negative cost would pay you for trading), got {np.nanmin(a):g}")
 

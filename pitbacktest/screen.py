@@ -4,7 +4,8 @@ This stage decides the conclusion. A candidate that clears the statistical thres
     monotonicity gates and the neutralisation against firm characteristics; that is the normal outcome.
 
 Principles
-    1. Uncontrolled results are returned but **left out of the default summary**. Only post-control results are reported.
+    1. The statistic that decides the first gate (`t`) is a Fama-MacBeth t **with controls**, and the factor is re-tested after neutralisation
+       (`neu_t`, `neu_survival_%`). Uncontrolled figures (`excess_bp`, `net_bp`, `rho`, and `coef_bp_raw`) are returned next to them, labelled as such.
     2. Missing firm characteristics produce a warning (a missing ROA or book-to-market is the main cause of false findings).
     3. The multiple-testing threshold is **measured with a shuffled null**.
     4. The whole **distribution** of a parameter grid is returned, not its best cell.
@@ -57,12 +58,15 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
            primary_h: int = 20, cost_bp: float = 20.0,
            fire_q: float = 0.10, n_null: int = 20,
            gate_config: GateConfig | None = None,
-           neutralize_all: bool = True) -> ScreenResult:
+           neutralize_all: bool = True, delist_return: float | None = None) -> ScreenResult:
     """Screen many factors at once.
 
     factors  {name: (date x ticker) continuous factor}
-    The returned summary holds **post-control figures only**. The uncontrolled coefficient and t of a factor are in
-    result.factors[name]['fm'][h]['coef_bp_raw'] and ['t_raw'].
+    delist_return  return assumed on the day after a security's last bar when it is flagged in panel.delist_after (None: carried at its last price).
+
+    In the summary, `t` is the Fama-MacBeth t **with controls**, and `neu_t` and `neu_survival_%` re-test the factor after residualising it
+    against the controls. `excess_bp`, `net_bp`, `rho` and the gates G2 to G6 come from the **uncontrolled** top `fire_q` firing. The uncontrolled
+    coefficient and t of a factor are in result.factors[name]['fm'][h]['coef_bp_raw'] and ['t_raw'].
     """
     el = panel.eligible
     ev = el.values
@@ -79,7 +83,7 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
         raise ValueError(f"primary_h={primary_h} must be one of horizons {tuple(horizons)}")
     if not (cost_bp >= 0 and np.isfinite(cost_bp)):
         raise ValueError(f"cost_bp must be finite and not negative, got {cost_bp!r}")
-    fwd = {h: panel.forward(h) for h in horizons}
+    fwd = {h: panel.forward(h, delist_return) for h in horizons}
     cums = {h: fwd[h].values.astype(np.float64) for h in horizons}
 
     # 1) measure the threshold with a shuffled null: running it for every factor is expensive, so a representative factor stands in

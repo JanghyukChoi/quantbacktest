@@ -44,10 +44,16 @@ def build_controls(panel, *, include_chars: bool = True) -> dict[str, pd.DataFra
         "rev5": close.pct_change(5),
         "mom21": close.pct_change(21),
         "mom63": close.pct_change(63),
-        # standard momentum 12-1: mom21/63 alone cannot capture it
-        "mom252_21": close.pct_change(getattr(panel, "periods_per_year", 252)) - close.pct_change(21),
         "vol21": ret.rolling(21, min_periods=21).std(),
     }
+    # standard momentum 12-1: mom21/63 alone cannot capture it. Its lookback is one year of bars; a panel shorter than that would give a
+    # control that is NaN everywhere, and every date would silently drop out of the regressions, so it is left out (with a warning).
+    lookback = int(getattr(panel, "periods_per_year", 252))
+    if lookback < len(close) - 21:
+        out["mom252_21"] = close.pct_change(lookback) - close.pct_change(21)
+    else:
+        warnings.warn(f"The 12-1 momentum control needs {lookback} bars of history and the panel has {len(close)}: it is left out of the controls.",
+                      stacklevel=2)
     if panel.mkt_cap is not None:
         out["logsize"] = np.log(panel.mkt_cap.replace(0, np.nan))
         adv = panel.adv(20)

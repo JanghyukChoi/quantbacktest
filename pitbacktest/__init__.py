@@ -9,7 +9,7 @@ Design principles
     - The core is plain pandas and numpy; data sources live in `adapters`.
     - There is one timing convention and it is enforced with an assert.
     - Controls for firm characteristics are the default.
-    - Uncontrolled results are left out of the summary.
+    - The statistics that decide a verdict are computed with controls; uncontrolled figures are returned next to them, not in their place.
 """
 
 from .core.panel import Panel, build_pit_eligible

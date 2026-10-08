@@ -40,6 +40,12 @@ def inject_delistings(panel: Panel, *, annual_rate: float = 0.03, hazard: str = 
     """Return a copy of `panel` in which a fraction `annual_rate` of the names alive at the start of each calendar year stop
     trading at a random date later that year. The last real bar is flagged in `delist_after` and prices, volume and
     eligibility are removed afterwards."""
+    if hazard not in ("uniform", "volatile", "illiquid"):
+        raise ValueError(f"hazard must be 'uniform', 'volatile' or 'illiquid', not {hazard!r}")
+    if hazard == "illiquid" and panel.volume is None:
+        raise ValueError("hazard='illiquid' needs panel.volume")
+    if not (0 <= annual_rate <= 1):
+        raise ValueError(f"annual_rate must be between 0 and 1, got {annual_rate!r}")
     rng = np.random.default_rng(seed)
     close = panel.close.copy()
     elig = panel.eligible.copy()

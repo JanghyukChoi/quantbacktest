@@ -294,6 +294,8 @@ def backtest_intraday(panel: Panel, factor: pd.DataFrame, *, one_way_bp: float =
                       hold: int = 1, **kw):
     """`backtest_portfolio` with the cost given as **one-way** basis points (the engine's scalar is a round trip), no grid and no
     benchmark. `hold` is in bars."""
+    if panel.entry_lag < 1:
+        raise ValueError("an intraday panel needs entry_lag >= 1: a bar's close is only known when the bar ends, so it cannot be traded on")
     kw.setdefault("benchmark", None)
     kw.setdefault("grid", False)
     return backtest_portfolio(panel, factor, long_q=long_q, short_q=short_q, hold=hold, spread_bp=2.0 * one_way_bp, **kw)

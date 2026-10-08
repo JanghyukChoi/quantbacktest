@@ -18,6 +18,16 @@
 - `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
 - Docstrings, comments, warnings and example output are now in English (the Korean left is the security-name filter and the quota message of the
   KRX adapter, which must match Korean text). Gate names and the `screen()` funnel keys are English too.
+- **Fixed (found by independent review of the specification)**: `screen` and `backtest_event` measured returns with `Panel.forward`, which was NaN when the
+  exit price was missing, so **a trade that ran into a delisting dropped out of their statistics**: the losses of delisted securities were missing, a
+  survivorship leak in the two tools that had no `delist_return`. `Panel.forward` now carries a security flagged in `delist_after` at its last price (or at
+  `last x (1 + delist_return)`), and `screen` and `backtest_event` take `delist_return`. A halt that is not a delisting still gives NaN.
+- **Fixed**: the README, the `screen` docstring and the package docstring said `screen` reports post-control results only. Only `t` and `neu_*` are
+  computed with controls; `excess_bp`, `net_bp` and `rho` come from the uncontrolled top-decile firing. The wording is corrected everywhere, and the
+  `Panel.forward` docstring (which described a log accumulation that never existed) is rewritten.
+- **Fixed**: an intraday backtest accepted `entry_lag=0` through a hand-built panel or `latency_sweep(lags=(0, ...))`; a scalar NaN cost passed the cost check and
+  produced NaN metrics; `inject_delistings` checked `hazard` only when it drew a name, and `hazard="illiquid"` without volume silently became uniform;
+  on a panel shorter than a year the 12-1 momentum control was NaN everywhere and every date dropped out of the regressions (it is now left out with a warning).
 - **Fixed (found while writing the specification)**: the `screen` gate G1 threshold is the 95th percentile of shuffled |t| values, and the default
   `n_null=2` made it the percentile of two numbers: biased far below the level of pure noise (about 0.9 on average against 1.96, 1.8 with 20 repetitions), so G1
   passed too easily. The default is now 20, fewer than 10 warns and fewer than 1 raises.
