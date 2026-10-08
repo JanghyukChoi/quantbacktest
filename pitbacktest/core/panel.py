@@ -51,6 +51,11 @@ class Panel:
     # Optional: (date x ticker) bool, True where a security can be sold short that day (borrowable, and no short-selling ban). None means every
     # security can. A date or security missing from the frame counts as **not** shortable: an unknown is not permission.
     shortable: pd.DataFrame | None = None
+    # Optional: (date x ticker) bool, False where a trade that increases (can_buy) or decreases (can_sell) a position cannot be done on that day
+    # (halted, or locked at a daily price limit). None means always possible; a date or security missing from the frame counts as not possible.
+    # `execution.tradability` builds them from prices and volume.
+    can_buy: pd.DataFrame | None = None
+    can_sell: pd.DataFrame | None = None
     meta: dict = field(default_factory=dict)
 
     # ---------------------------------------------------------------- construction and validation
@@ -71,8 +76,10 @@ class Panel:
         }
         if self.delist_after is not None:
             self.delist_after = self.delist_after.fillna(False).astype(bool)
-        if self.shortable is not None:
-            self.shortable = self.shortable.reindex(index=self.close.index, columns=self.close.columns).fillna(False).astype(bool)
+        for k in ("shortable", "can_buy", "can_sell"):
+            v = getattr(self, k)
+            if v is not None:
+                setattr(self, k, v.reindex(index=self.close.index, columns=self.close.columns).fillna(False).astype(bool))
         self.validate()
 
     def validate(self) -> None:
@@ -130,7 +137,7 @@ class Panel:
         The date index and the ticker names are not hashed: the same values in the same shape give the same fingerprint."""
         import hashlib
         h = hashlib.sha256()
-        mats = [(n, getattr(self, n)) for n in ("close", "eligible", "open", "high", "low", "volume", "mkt_cap", "funding", "delist_after", "shortable")]
+        mats = [(n, getattr(self, n)) for n in ("close", "eligible", "open", "high", "low", "volume", "mkt_cap", "funding", "delist_after", "shortable", "can_buy", "can_sell")]
         mats += [(f"chars.{k}", self.chars[k]) for k in sorted(self.chars)]
         for name, v in mats:
             if v is not None:

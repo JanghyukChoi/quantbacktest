@@ -21,6 +21,7 @@ import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
 from .core.panel import Panel
+from .execution import exec_masks, realize
 
 ANN = 252
 
@@ -240,7 +241,20 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             w = np.where(mv, (r - (1 - q)) if top else (q - r), 0.0)
         return _normalize(w)
 
-    hl = _tranche(leg(long_q, True), hold)
+    bo, so = exec_masks(panel)                                           # can the trade be done on the execution day? (None: always)
+    ex = {"asked_turnover": 0.0, "blocked_turnover": 0.0, "blocked_trades": 0, "mean_stuck_weight": 0.0, "longest_freeze_days": 0}
+
+    def execute(h: np.ndarray, sign: float, record: bool) -> np.ndarray:
+        """The leg's positions after blocked trades. A short leg is a negative position, so covering it is a buy."""
+        if bo is None:
+            return h
+        pos, st = realize(sign * h, bo, so)
+        if record:
+            for k in ex:
+                ex[k] = max(ex[k], st[k]) if k == "longest_freeze_days" else ex[k] + st[k]
+        return sign * pos
+
+    hl = execute(_tranche(leg(long_q, True), hold), 1.0, True)
     gross = (hl * fwd).sum(axis=1)
     cost = apply_turnover_cost(hl, spread_bp)
     side = apply_side_cost(hl, bb, sb)
@@ -249,7 +263,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     held = hl > 0
     hs = None
     if short_q:
-        hs = _tranche(leg(short_q, False), hold)
+        hs = execute(_tranche(leg(short_q, False), hold), -1.0, True)
         gross = gross - (hs * fwd).sum(axis=1)
         cost = cost + apply_turnover_cost(hs, spread_bp)
         side = side + apply_side_cost(-hs, bb, sb)                  # a short is a negative weight: opening it is a sell
@@ -265,6 +279,11 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     m["cost_annual_bp"] = float(cost[:cut].mean() * panel.periods_per_year * 1e4)
     m["gross_CAGR"] = metrics(gross[:cut], panel.dates, panel.periods_per_year)["CAGR"]
     m["side_cost_annual_bp"] = float(side[:cut].mean() * panel.periods_per_year * 1e4)   # the part of cost_annual_bp from buy_bp and sell_bp
+    if bo is not None:
+        m["blocked_trades"] = int(ex["blocked_trades"])                  # name-days on which a wanted trade could not be done
+        m["blocked_turnover_share"] = float(ex["blocked_turnover"] / ex["asked_turnover"]) if ex["asked_turnover"] > 0 else 0.0
+        m["mean_stuck_weight"] = float(ex["mean_stuck_weight"])             # both legs, in units of capital
+        m["longest_freeze_days"] = int(ex["longest_freeze_days"])
     if panel.shortable is not None and short_q:
         m["short_leg_empty_days"] = int((el.to_numpy(bool).any(axis=1) & ~el_s.to_numpy(bool).any(axis=1))[:cut].sum())   # eligible names exist, none can be sold short
     m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
@@ -286,12 +305,12 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     if grid:
         g = {}
         for h in (1, 2, 5, 10, 21):
+            hl2 = execute(_tranche(leg(long_q, True), h), 1.0, False)
+            hs2 = execute(_tranche(leg(short_q, False), h), -1.0, False) if short_q else None
             for c in (0, 2, 5, 10, 20):
-                hl2 = _tranche(leg(long_q, True), h)
                 gr = (hl2 * fwd).sum(axis=1)
                 co = apply_turnover_cost(hl2, c) + apply_side_cost(hl2, bb, sb) + (hl2 * fwdf).sum(axis=1)
                 if short_q:
-                    hs2 = _tranche(leg(short_q, False), h)
                     gr = gr - (hs2 * fwd).sum(axis=1)
                     co = co + apply_turnover_cost(hs2, c) + apply_side_cost(-hs2, bb, sb) - (hs2 * fwdf).sum(axis=1)
                 mm = metrics((gr - co)[:cut], panel.dates, panel.periods_per_year)

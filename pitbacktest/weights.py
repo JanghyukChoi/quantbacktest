@@ -26,7 +26,14 @@ Costs, all charged on the signal date of the trade, in return per unit of capita
 You cannot open or increase a position in a security that is not eligible that day: an optimiser that buys names outside
 the point-in-time universe is using information it should not have. A position already held may stay after the name leaves the
 universe until you reduce it. Long and short exposure are checked separately, so turning a long into a smaller short in a name that is
-not eligible is an increase of its short and raises. If `panel.shortable` is given, opening or increasing a short in a security
+not eligible is an increase of its short and raises.
+
+Execution (what can actually be traded)
+  `panel.can_buy` / `panel.can_sell` (see `pitbacktest.execution`): a trade that increases a position on a day when it cannot be bought, or
+  decreases one where it cannot be sold, does not happen and the position stays. They are read on the execution day, `lag` after the signal.
+  `capital`, `price`, `lot`, `min_trade_value`: with `capital` given, each day's target is rounded to whole lots at the real prices and trades
+  worth less than `min_trade_value` are skipped, so that a small account does not hold 0.3 of a share or trade a few dollars.
+  The returned `holdings` are the positions after all of that. If `panel.shortable` is given, opening or increasing a short in a security
 that cannot be sold short that day raises as well.
 """
 from __future__ import annotations
@@ -38,6 +45,7 @@ import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
 from .core.panel import Panel
+from .execution import exec_masks, realize
 from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config,
                         _side_label, metrics)
 
@@ -81,13 +89,17 @@ def _impact_cost(panel: Panel, H: np.ndarray, m: ImpactModel) -> tuple[np.ndarra
 def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_bp=0.0, sell_bp=0.0, borrow_bp=0.0,
                      impact: ImpactModel | None = None, funding: bool = True, delist_return: float | None = None,
                      benchmark: str | None = "cap", ledger=None, family: str = "default",
-                     name: str | None = None, check_universe: bool = True, check_shortable: bool = True) -> PortfolioResult:
+                     name: str | None = None, check_universe: bool = True, check_shortable: bool = True,
+                     capital: float | None = None, price=None, lot=1.0, min_trade_value: float = 0.0) -> PortfolioResult:
     """Net returns of the weights you supply. See the module docstring for timing and costs.
 
     `check_universe` raises if a long or a short position is opened or increased in a security that is not eligible that day. It looks at
     net weights, so a name that is long from one signal and short from another (the two cancel) can show an increase when the
     short expires; holdings built from overlapping long and short tranches (`PortfolioResult.holdings`) can trip it, and
     then `check_universe=False` is the honest setting. Weights from an optimiser that nets positions are not affected.
+    `capital` (money, same currency as `price` and `ImpactModel.aum`), `price` (date x ticker **real** price level: a back-adjusted series has an
+    arbitrary level and gives wrong share counts), `lot` (shares per lot: a number, a Series by ticker or a date x ticker frame) and
+    `min_trade_value` (money) switch on whole-lot sizes; without `capital` they must be left alone.
     `check_shortable` (only with `panel.shortable`) raises if a short is opened or increased where the security cannot be sold short.
 
     Costs are charged on the **net** trade per security. `backtest_portfolio` charges its long and short legs as separate sleeves,
@@ -118,6 +130,32 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
             i, j = np.argwhere(nos)[0]
             raise ValueError(f"{int(nos.sum())} short positions opened or increased on securities that cannot be sold short that day "
                              f"(first: {panel.tickers[j]} on {panel.dates[i].date()}); see Panel.shortable")
+    bo, so = exec_masks(panel)
+    ex = None
+    if capital is None and (price is not None or min_trade_value or (np.ndim(lot) or float(lot) != 1.0)):
+        raise ValueError("price, lot and min_trade_value need capital: whole-lot sizes depend on how much money there is")
+    if capital is not None:
+        if not (np.isfinite(capital) and capital > 0):
+            raise ValueError(f"capital must be a positive number, got {capital!r}")
+        if price is None:
+            raise ValueError("capital needs price, the real price level in the same currency (not a back-adjusted series)")
+        if not (np.isfinite(min_trade_value) and min_trade_value >= 0):
+            raise ValueError(f"min_trade_value must be at least 0, got {min_trade_value!r}")
+        px = price.reindex(index=panel.dates, columns=panel.tickers).to_numpy(float) if isinstance(price, pd.DataFrame) else None
+        if px is None:
+            raise ValueError("price must be a (date x ticker) frame")
+        if isinstance(lot, pd.DataFrame):
+            lot_ = lot.reindex(index=panel.dates, columns=panel.tickers).to_numpy(float)
+        elif isinstance(lot, pd.Series):
+            lot_ = lot.reindex(panel.tickers).to_numpy(float)
+        else:
+            lot_ = float(lot)
+        if np.isnan(lot_).any() or not (np.asarray(lot_) > 0).all():
+            raise ValueError("lot must be positive and known for every security")
+    H_in = H                                                            # what was asked for; `H` becomes what could be held
+    if bo is not None or capital is not None:
+        H, ex = realize(H, bo, so, capital=capital, price=px if capital is not None else None,
+                        lot=lot_ if capital is not None else 1.0, min_trade_value=float(min_trade_value))
     fwd, fwdf, hit_next = _forward_arrays(panel, funding, delist_return)
     cut = len(panel.dates) - (panel.entry_lag + 1)
     gross = (H * fwd).sum(axis=1)
@@ -143,6 +181,14 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
               "impact_annual_bp": float(imp[:cut].mean() * ppy * 1e4), "funding_annual_bp": float(fcost[:cut].mean() * ppy * 1e4),
               "avg_gross_exposure": float(np.abs(H[:cut]).sum(axis=1).mean()), "avg_net_exposure": float(H[:cut].sum(axis=1).mean()),
               "delist_events_held": int(((H != 0) & hit_next)[:cut].sum()), "nan_weights_treated_as_zero": n_nan})
+    if ex is not None:
+        m["blocked_trades"] = int(ex["blocked_trades"])
+        m["blocked_turnover_share"] = float(ex["blocked_turnover"] / ex["asked_turnover"]) if ex["asked_turnover"] > 0 else 0.0
+        m["mean_stuck_weight"] = float(ex["mean_stuck_weight"])
+        m["longest_freeze_days"] = int(ex["longest_freeze_days"])
+        if capital is not None:
+            m.update({"min_trade_skipped": int(ex["min_trade_skipped"]), "min_trade_skipped_share": float(ex["min_trade_skipped_share"]),
+                      "mean_abs_rounding_gap": float(ex["mean_abs_rounding_gap"])})
     if part is not None:
         p = part[:cut][np.isfinite(part[:cut])]
         m["participation_p99"] = float(np.percentile(p, 99)) if len(p) else float("nan")
@@ -161,14 +207,25 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
             "buy_bp": _side_label(bb), "sell_bp": _side_label(sb), "borrow_bp": "panel" if b.ndim else float(b),
             "impact": None if impact is None else {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window,
                                                    "adv_window": impact.adv_window, "max_cost_bp": impact.max_cost_bp},
-            "funding": bool(funding and panel.funding is not None), "delist_return": delist_return}
+            "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
+            "execution": None if (bo is None and capital is None) else {"blocked": bo is not None, "capital": capital, "min_trade_value": float(min_trade_value)}}
     if ledger is not None:
         from .ledger import array_fingerprint
-        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp")}, **_side_config(bb, sb),
+        ledger.record(family, name or "weights", s, {**{k: v for k, v in spec.items() if k not in ("buy_bp", "sell_bp", "execution")}, **_side_config(bb, sb), **_exec_config(spec, capital, price, lot),
                                                     "spread_bp": spread_bp if np.ndim(spread_bp) == 0 else array_fingerprint(spread_bp),
-                                                    "weights": array_fingerprint(H), "data": panel.fingerprint()})
+                                                    "weights": array_fingerprint(H_in), "data": panel.fingerprint()})
     return PortfolioResult(spec=spec, metrics=m, benchmark=bench, excess=bexc, yearly={str(k): v for k, v in yr.items()}, grid=None,
                            holdings=H, net_returns=s, benchmark_returns=bret)
+
+
+def _exec_config(spec: dict, capital, price, lot) -> dict:
+    """Ledger configuration of the execution settings; empty when none is used, so older runs keep their fingerprint."""
+    if capital is None:
+        return {}
+    from .ledger import array_fingerprint
+    return {"capital": float(capital), "min_trade_value": spec["execution"]["min_trade_value"],
+            "price": array_fingerprint(price.to_numpy(float)),
+            "lot": float(lot) if np.ndim(lot) == 0 else array_fingerprint(np.asarray(lot, dtype=float))}
 
 
 def capacity_curve(panel: Panel, weights: pd.DataFrame, aums, *, y_values=(1.0,), max_cost_bp: float = 100.0,
