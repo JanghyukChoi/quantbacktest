@@ -55,8 +55,9 @@ def build(market: str):
         from pitbacktest.equity import load_us_master
         full = os.path.expanduser("~/.cache/quantbt/tiingo_full")
         plain = os.path.expanduser("~/.cache/quantbt/tiingo")
-        store = full if (os.path.isdir(full) and len(os.listdir(full)) >= len(os.listdir(plain))) else plain
         names = sorted(f[:-5] for f in os.listdir(plain) if f.endswith(".json"))
+        n_full = len([f for f in os.listdir(full) if f.endswith(".json")]) if os.path.isdir(full) else 0
+        store = full if n_full >= len(names) else plain                      # the full-field store is used only once it holds every ticker
         P = tiingo.build_tiingo_panel(store, load_us_master(), names, start="2013-01-01")
         return P, dict(limit=None, label=f"US Tiingo sample 2013- ({'full fields' if store == full else 'close only'}, {len(names)} tickers)")
     if market == "crypto":
@@ -162,6 +163,18 @@ def run_market(market: str) -> dict:
               f"{big} left; {len(sus)} were listed as suspect in this panel's raw chain, {int(sus.after_suspension.sum())} of them after zero or missing volume")
     else:
         print(f"  info V7 data: {big} of {int(r1.notna().sum().sum()):,} observed daily returns are beyond +100% (not a pass rule: real pumps exist)", flush=True)
+    if P.open is not None and P.high is not None and P.low is not None:
+        o, h, l, cl = (x.to_numpy(float) for x in (P.open, P.high, P.low, P.close))
+        ok = np.isfinite(o) & np.isfinite(h) & np.isfinite(l) & np.isfinite(cl)
+        check("V7 data: open, high and low are positive where they exist", bool((o[ok] > 0).all() and (h[ok] > 0).all() and (l[ok] > 0).all()), f"{int(ok.sum()):,} bars")
+        tol = 1e-6
+        bad = ok & ((o > h * (1 + tol)) | (o < l * (1 - tol)) | (cl > h * (1 + tol)) | (cl < l * (1 - tol)))
+        print(f"  info V7 data: {int(bad.sum()):,} of {int(ok.sum()):,} bars have the open or close outside [low, high] ({bad.sum() / max(ok.sum(), 1):.4%}; data noise, not a pass rule)", flush=True)
+        out["numbers"]["ohlc_outside_range_share"] = float(bad.sum() / max(ok.sum(), 1))
+    dv = P.meta.get("div_cash")
+    if dv is not None:
+        d = dv.to_numpy(float)
+        check("V7 data: dividends are never negative and exist", bool((d[np.isfinite(d)] >= 0).all() and (np.nansum(d) > 0)), f"{int((d[np.isfinite(d)] > 0).sum()):,} dividend payments in the panel")
     out["numbers"].update(returns_beyond_100pct=big, delist_flags=int(P.delist_after.to_numpy().sum()) if P.delist_after is not None else None)
     out["seconds"] = round(time.time() - t0)
     out["passed"] = all(x["ok"] for x in out["checks"])

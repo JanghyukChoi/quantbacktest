@@ -270,6 +270,11 @@ panel = build_krx_panel("~/.cache/quantbt/krx", start="2013-01-01")
 A ticker is not an identifier: in the probe, five tickers returned the history of a *different* company that later reused the
 symbol, with no error. See `docs/survivorship.md`.
 
+## What is verified, and what is not
+
+`docs/verification_status.md` lists the evidence behind each part and, more important, what is not established (no human review yet, Korean dividends, the impact coefficient, the weaker
+parts such as `screen` and `backtest_event`). Read it before relying on a result.
+
 ## Tests: known answers, not real data
 
 Every test uses data where the right answer is known, so none of them needs a network or real prices.
