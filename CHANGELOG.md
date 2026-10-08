@@ -54,6 +54,14 @@
 - **Impact coefficient against the order book.** `docs/crypto_impact_check.md`, `docs/crypto_impact_study.py`: from the public `bookDepth` files (30 contracts, 10 days),
   the Y the visible book implies is about 0.1 to 0.8 for orders up to 0.3 percent of a day's turnover and 1.2 to 2.7 at 1 percent, so `Y = 1` overstates small orders and understates
   large ones; `capacity_curve(y_values=(0.5, 1.0, 2.0))` brackets it. The size dependence is built into the interpolation and is not a finding. `ImpactModel` is unchanged.
+- **Frozen positions.** `execution.freeze_episodes` finds trading suspensions (a price but no volume) of at least N days and classifies how each ended (resumed, resumed then
+  delisted, ended in halt, ongoing) with the return to the end of it. `backtest_portfolio` and `backtest_weights` take `freeze_days` and `freeze_return`: a long position in a security whose
+  suspension reaches `freeze_days` is marked down once (shorts are not credited), and `cap_gross`, which scales the free names by the largest k that keeps the gross exposure at the target's
+  (bisection on k; days on which the stuck positions alone exceed the target are counted). Defaults change nothing. Measured on KRX since mid-2015: a suspension that has lasted 20, 60, 120 days
+  ends in a delisting 25, 35, 48 percent of the time and the mean return to the end of it is -23, -35, -49 percent (median -7, -14, -30).
+- **Fixed (KRX adapter)**: `close / (close - change) - 1` gives a move of thousands of percent when a consolidation happens during a suspension (one case: +29,948%). They are now listed in
+  `meta["suspect_returns"]` and `build_krx_panel(drop_suspect_above=1.0)` can cut them; the default is unchanged so earlier results reproduce. None of the repository's strategies held such a
+  name. The first measurement of suspension outcomes was distorted by exactly this: one false +15,285% made the mean look like zero.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.

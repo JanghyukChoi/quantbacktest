@@ -133,12 +133,21 @@ def fetch_days(start, end, store_dir, *, key: str | None = None, markets=("KOSPI
 
 def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, adv_window: int = 30,
                     min_value_krw: float = 1e9, common_only: bool = True, exclude=DEFAULT_EXCLUDE,
-                    reuse_gap_days: int = 120, entry_lag: int = 1) -> Panel:
+                    reuse_gap_days: int = 120, entry_lag: int = 1, drop_suspect_above: float | None = None) -> Panel:
     """Point-in-time Panel of Korean stocks from the cached daily files.
 
     eligible on day t uses data up to t only: at least `min_age_days` bars of history, trailing median traded value of
     at least `min_value_krw`, positive volume that day, common shares only (code ends in 0) and no SPAC or REIT names.
-    A code that disappears for more than `reuse_gap_days` and comes back is treated as a different security (suffix #2)."""
+    A code that disappears for more than `reuse_gap_days` and comes back is treated as a different security (suffix #2).
+
+    Known defect of the return rule. The adjusted return is `close / (close - change) - 1`, which is right when the exchange's reference price already
+    reflects a split or rights issue. When a security is **suspended and a consolidation or capital reduction happens meanwhile**, the first day of trading
+    again carries a `change` against the old, unadjusted close, and the formula returns a move of thousands of percent that never happened (one case in the
+    cache: 2,080 won to 625,000 won, +29,948%). Every daily return beyond +-100% is listed in `meta["suspect_returns"]` (ticker, date, return, and whether the
+    previous day was a suspension), 39 of 7.8 million in the cache, 14 of the upward ones on the first day after a suspension. `drop_suspect_above=1.0` treats
+    such a day as a return of 0 (the price chain is cut there, the true move is unknown); the default None leaves the series as it was, so earlier results
+    reproduce. The strategies in this repository do not hold suspended names (eligibility needs volume), so none of them was affected; a position that is
+    **stuck** in a suspended name (`Panel.can_buy`/`can_sell`, `freeze_*`) can be."""
     store = Path(store_dir).expanduser()
     files = sorted(store.glob("*.pkl"))
     if start:
@@ -168,6 +177,15 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
     ret = (close / ref - 1.0).where(ref > 0)
     first = close.notna() & ~close.notna().cumsum().shift(1, fill_value=0).astype(bool)   # a security's first bar
     ret = ret.mask(first)                                                    # the listing-day move is not tradable
+    vol_prev0 = (mat("volume").fillna(0) <= 0).shift(1, fill_value=False)
+    sus = ret.stack()
+    sus = sus[sus.abs() > 1.0]
+    suspect = pd.DataFrame({"ticker": sus.index.get_level_values(1), "date": sus.index.get_level_values(0), "ret": sus.to_numpy(),
+                            "after_suspension": [bool(vol_prev0.loc[d, t]) for d, t in sus.index]}).reset_index(drop=True)
+    if drop_suspect_above is not None:
+        if not (drop_suspect_above > 0):
+            raise ValueError(f"drop_suspect_above must be positive, got {drop_suspect_above!r}")
+        ret = ret.mask(ret.abs() > drop_suspect_above)                      # unknown, so the chain treats it as 0
     adj = 100.0 * np.exp(np.log1p(ret.fillna(0.0)).cumsum().where(close.notna()))
     k = adj / close                                                          # adjust open/high/low to the same level
     value, vol_raw = mat("value"), mat("volume")
@@ -189,7 +207,7 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
               delist_after=da)
     n = ok.sum(axis=1)
     mk = mat("_mk").fillna(-1).astype("int8")                                # the market of each security on each day (-1: not listed)
-    p.meta = {"market_codes": {i: m for i, m in enumerate(market_names)}, "market_by_date": mk,
+    p.meta = {"suspect_returns": suspect, "market_codes": {i: m for i, m in enumerate(market_names)}, "market_by_date": mk,
               "raw_close": close.astype("float32"),                  # the real price level (won), for whole-share sizes; `close` is back-adjusted
               "securities": int(close.shape[1]), "delisted_in_panel": int(da.values.any(axis=0).sum()),
               "eligible_median": float(n[n > 0].median()), "first_day": str(close.index[0].date()),

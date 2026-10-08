@@ -4,6 +4,7 @@ K1 survivorship  a stock that was listed on day t but is gone later is in the pa
 K2 split         a 50:1 split (raw price falls 98%) leaves the adjusted return unchanged
 K3 listing day   the first bar of a new listing has no return, and the stock waits `min_age_days` to be eligible
 K4 code reuse    a code that comes back after a long gap becomes a different security
+K6 suspension   a consolidation during a suspension makes a huge false return: it is listed, kept by default, cut on request
 K5 resumable     a second fetch calls the API zero times; a quota error stops cleanly and keeps what was saved
 """
 from __future__ import annotations
@@ -94,8 +95,61 @@ def test_quota_stops_cleanly():
     print(f"K5 quota error stops cleanly, {saved} days kept  PASS")
 
 
+def test_suspect_returns_after_a_suspension():
+    """K6 a security suspended for 30 days, during which it was consolidated 300 to 1: the first day of trading again carries a change against the old close, and
+    the adjusted return becomes +29,948%. It is listed, it can be cut, and nothing else moves."""
+    import tempfile
+    days = pd.bdate_range("2021-01-04", periods=120)
+    rng = np.random.default_rng(3)
+    codes = [f"{(i + 1) * 10:06d}" for i in range(14)]
+    px = {c: 10000.0 for c in codes}
+    sus = "099990"; px[sus] = 2080.0
+    with tempfile.TemporaryDirectory(prefix="krxtest-") as d:
+        for t, day in enumerate(days):
+            rows = []
+            for c in codes:
+                new = px[c] * (1 + rng.normal(0, 0.01)) * (2.5 if (c == codes[1] and t == 60) else 1.0)     # codes[1]: one ordinary +150% day, no suspension
+                rows.append(dict(code=c, name=f"N{c}", market="KOSPI", close=int(new), change=int(new - px[c]), open=int(new), high=int(new), low=int(new),
+                                 volume=1_000_000, value=int(5e9), mktcap=int(new * 1e7), shares=10_000_000)); px[c] = new
+            if t < 40:                                                                       # trades normally until day 39
+                nw = px[sus] * (1 + rng.normal(0, 0.01)); rows.append(dict(code=sus, name="SUSCO", market="KOSPI", close=int(nw), change=int(nw - px[sus]), open=int(nw), high=int(nw), low=int(nw),
+                                                                           volume=500_000, value=int(5e9), mktcap=int(nw * 1e7), shares=10_000_000)); px[sus] = nw
+            elif t < 70:                                                                     # suspended: same close, no volume
+                rows.append(dict(code=sus, name="SUSCO", market="KOSPI", close=int(px[sus]), change=0, open=int(px[sus]), high=int(px[sus]), low=int(px[sus]), volume=0, value=0, mktcap=int(px[sus] * 1e7), shares=10_000_000))
+            else:                                                                            # trading again after a 300:1 consolidation; the change is against the OLD close
+                new_close = int(round(px[sus] * 300 * (1 + (0.02 if t == 70 else rng.normal(0, 0.01)))))
+                chg = new_close - int(px[sus]) if t == 70 else new_close - int(prev_close)
+                rows.append(dict(code=sus, name="SUSCO", market="KOSPI", close=new_close, change=chg, open=new_close, high=new_close, low=new_close, volume=400_000, value=int(5e9), mktcap=new_close * 10_000_000, shares=10_000_000))
+                prev_close = new_close
+            pd.DataFrame(rows).to_pickle(f"{d}/{day:%Y%m%d}.pkl")
+        old = krx.build_krx_panel(d, min_age_days=5, adv_window=5, min_value_krw=1e6)
+        cut = krx.build_krx_panel(d, min_age_days=5, adv_window=5, min_value_krw=1e6, drop_suspect_above=1.0)
+        sr = old.meta["suspect_returns"]
+        assert len(sr) == 2, sr
+        a = sr[sr.ticker == sus].iloc[0]; b = sr[sr.ticker == codes[1]].iloc[0]
+        assert bool(a["after_suspension"]) and a["ret"] > 100 and not bool(b["after_suspension"]) and abs(b["ret"] - 1.5) < 0.02, sr
+        mid = krx.build_krx_panel(d, min_age_days=5, adv_window=5, min_value_krw=1e6, drop_suspect_above=2.0)       # between the two: only the false one is cut
+        assert mid.close[codes[1]].pct_change().max() > 1.4 and mid.close[sus].pct_change().abs().max() < 0.2
+        assert old.close[sus].pct_change().max() > 100                                       # the default keeps the series as it was
+        r2 = cut.close[sus].pct_change()
+        assert abs(r2.iloc[70]) < 1e-12 and r2.abs().max() < 0.2, r2.abs().max()           # cut: that day is flat, every other day is a normal return
+        assert cut.close[codes[1]].pct_change().abs().max() < 0.2                             # at 1.0 the ordinary +150% day is cut as well: the threshold is on size, not on cause
+        others = [c for c in codes if c != codes[1]]
+        assert np.allclose(old.close[others].to_numpy(), cut.close[others].to_numpy(), equal_nan=True)   # nothing else changed (codes[1]'s +150% day is cut at 1.0 too)
+        r_old = old.close[sus].pct_change().drop(old.dates[70]); r_cut = cut.close[sus].pct_change().drop(cut.dates[70])
+        assert np.allclose(r_old.fillna(0).to_numpy(), r_cut.fillna(0).to_numpy(), atol=1e-12)          # every other return of the suspended name is the same
+        try:
+            krx.build_krx_panel(d, min_age_days=5, adv_window=5, min_value_krw=1e6, drop_suspect_above=0.0)
+        except ValueError as e:
+            assert "positive" in str(e)
+        else:
+            raise AssertionError("a zero threshold must raise")
+    print("K6 a consolidation during a suspension gives a +29,948% return: listed, kept by default, cut on request, and nothing else changes  PASS")
+
+
 if __name__ == "__main__":
     import warnings; warnings.filterwarnings("ignore")
     test_adapter()
     test_quota_stops_cleanly()
+    test_suspect_returns_after_a_suspension()
     print("krx tests: all passed")
