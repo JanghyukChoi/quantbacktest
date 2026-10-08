@@ -61,7 +61,8 @@
   ends in a delisting 25, 35, 48 percent of the time and the mean return to the end of it is -23, -35, -49 percent (median -7, -14, -30).
 - **Fixed (KRX adapter)**: `close / (close - change) - 1` gives a move of thousands of percent when a consolidation happens during a suspension (one case: +29,948%). They are now listed in
   `meta["suspect_returns"]` and `build_krx_panel(drop_suspect_above=1.0)` can cut them; the default is unchanged so earlier results reproduce. None of the repository's strategies held such a
-  name. The first measurement of suspension outcomes was distorted by exactly this: one false +15,285% made the mean look like zero.
+  name. The first measurement of suspension outcomes was distorted by exactly this: one false jump made the mean look like zero (+29,948% in one day; +15,285% over the whole suspension-to-delisting episode in the uncleaned panel).
+  In the whole cache 38 daily returns beyond +-100% are listed (14 right after zero or missing volume); 29 of them, 10 after zero volume, since June 2015.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.

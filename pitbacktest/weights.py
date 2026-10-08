@@ -103,7 +103,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     a back-adjusted series has an arbitrary level and gives wrong share counts; the engine sizes row t at `price` of day t + `entry_lag`, the day it is traded), `lot` (shares per lot: a number, a Series by ticker or a date x ticker frame) and
     `min_trade_value` (money; a number or a Series by ticker) switch on whole-lot sizes; without `capital` they must be left alone.
     `freeze_days`, `freeze_return`: a long position in a security whose suspension (a price but no volume) reaches `freeze_days` days is marked down once by
-    `freeze_return` (between -1 and 0), on the day it reaches that length; shorts are not credited. A scenario, not a measurement (see `execution.freeze_episodes`).
+    `freeze_return` (between -1 and 0): the loss is taken by the close of the `freeze_days`-th suspended day (booked on the signal row `entry_lag` days earlier); shorts are not credited. A scenario, not a measurement (see `execution.freeze_episodes`).
     `cap_gross`: positions that cannot be traded tie up capital; the free names are scaled down so that the gross exposure stays at the target's (see `execution.realize`).
     `check_shortable` (only with `panel.shortable`) raises if a short is opened or increased where the security cannot be sold short.
 

@@ -248,7 +248,7 @@ def test_freeze_markdown():
         assert b2.holdings[row, 0] > 0
         assert np.allclose(d2, w2, atol=1e-15), (lag, np.nonzero(np.abs(d2) > 1e-15)[0], row)
         assert abs(f2.grid["h1_c0"]["CAGR"] - b2.grid["h1_c0"]["CAGR"]) > 1e-9           # the sensitivity grid carries the markdown too
-    for bad in ({"freeze_days": 0}, {"freeze_days": True}, {"freeze_days": 2.5}, {"freeze_days": 5, "freeze_return": 0.1}, {"freeze_days": 5, "freeze_return": -1.5}, {"freeze_days": 5, "freeze_return": float("nan")}):
+    for bad in ({"freeze_days": 5, "freeze_return": False}, {"freeze_days": 5, "freeze_return": "x"}, {"freeze_days": 0}, {"freeze_days": True}, {"freeze_days": 2.5}, {"freeze_days": 5, "freeze_return": 0.1}, {"freeze_days": 5, "freeze_return": -1.5}, {"freeze_days": 5, "freeze_return": float("nan")}):
         _raises(lambda: q.backtest_weights(pp, W, benchmark=None, check_universe=False, **bad), "freeze")
         _raises(lambda: q.backtest_portfolio(pp, f, long_q=0.2, short_q=None, hold=1, benchmark=None, **bad), "freeze")
     print("X4d a suspended long is marked down once, on the K-th suspended day, at every entry lag; shorts, unheld names and other days are untouched; both engines; bad arguments raise  PASS")
@@ -289,6 +289,21 @@ def test_cap_gross():
     cs5 = np.ones((T, N), bool); cs5[50:80, 0] = False
     c6, s6 = ex.realize(tg5, None, cs5, cap_gross=True)
     assert np.allclose(c6[60], [0.5, 0, 0.6 * (0.6 - 0.5) / 0.6, 0, 0, 0], atol=1e-12) and s6["infeasible_days"] == 0, c6[60]   # k = (0.6 - 0.5) / 0.6
+    # a name that cannot be bought stays where it is only while the scaled target is not below it: scaled under it, it is sold down (so it can shrink)
+    t6 = np.array([[0.5, 0.2, 0.6], [0.8, 0.2, 0.0]])
+    nb = np.ones((2, 3), bool); nb[1, 0] = False                                                    # name 0 cannot be bought on row 1
+    ns = np.ones((2, 3), bool); ns[1, 2] = False                                                    # name 2 cannot be sold on row 1
+    o6, _ = ex.realize(t6, nb, ns, cap_gross=True)
+    assert np.allclose(o6[1], [0.32, 0.08, 0.6], atol=1e-9) and abs(np.abs(o6[1]).sum() - 1.0) < 1e-9, o6[1]    # k = 0.4: name 0 falls from 0.5 to 0.32
+    o6b, _ = ex.realize(t6, nb, ns)
+    assert np.allclose(o6b[1], [0.5, 0.2, 0.6])                                                     # without the cap both are simply stuck and the free name keeps its target
+    # with `capital` and nothing blocked, lot rounding may raise the gross above the raw target's: the cap must not cut that (k = 1, identical output)
+    rng6 = np.random.default_rng(6)
+    T6, N6 = 60, 8
+    tg6 = rng6.normal(0, 0.1, (T6, N6)); px6 = np.exp(rng6.normal(3.5, 0.5, (T6, N6)))
+    a6, sa = ex.realize(tg6, None, None, capital=5e3, price=px6, lot=10.0, cap_gross=True)
+    b6, sb = ex.realize(tg6, None, None, capital=5e3, price=px6, lot=10.0)
+    assert np.array_equal(a6, b6) and sa["mean_free_scale"] == 1.0 and sa["infeasible_days"] == 0, (sa["mean_free_scale"], sa["infeasible_days"])
     # property: over random masks the gross never exceeds the target's, the free names are never scaled up, and with nothing blocked the result is unchanged
     rng = np.random.default_rng(7)
     bad = 0

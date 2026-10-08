@@ -93,7 +93,9 @@ def halt_runs(panel: Panel) -> np.ndarray:
 
 def freeze_hits(panel: Panel, freeze_days: int | None) -> np.ndarray | None:
     """(date x ticker) bool indexed by the **signal date**: True where the execution day (signal date + `entry_lag`) is exactly the `freeze_days`-th day of a suspension.
-    None when `freeze_days` is None. A suspension marks a position down once, on the day it reaches that length, and not again however long it lasts."""
+    None when `freeze_days` is None. A suspension marks a position down once and not again however long it lasts. The markdown is booked on the signal-date row, which is
+    the `freeze_days`-th suspended day minus `entry_lag`, and it enters the return of that row (close of the execution day to the close of the next), so it is the
+    `freeze_days`-th suspended day's close that takes the loss."""
     if freeze_days is None:
         return None
     if isinstance(freeze_days, bool) or not isinstance(freeze_days, (int, np.integer)) or freeze_days < 1:
@@ -105,6 +107,8 @@ def freeze_hits(panel: Panel, freeze_days: int | None) -> np.ndarray | None:
 
 def check_freeze_return(freeze_return: float) -> float:
     """`freeze_return` as a float, or ValueError unless it is between -1 and 0 (a markdown is never a gain)."""
+    if isinstance(freeze_return, (bool, np.bool_)) or not isinstance(freeze_return, (int, float, np.integer, np.floating)):
+        raise ValueError(f"freeze_return must be a number between -1 and 0, got {freeze_return!r}")
     if not (np.isfinite(freeze_return) and -1.0 <= freeze_return <= 0.0):
         raise ValueError(f"freeze_return must be between -1 and 0 (a markdown is never a gain), got {freeze_return!r}")
     return float(freeze_return)
@@ -115,13 +119,16 @@ def freeze_episodes(panel: Panel, *, min_days: int = 20, relist_days: int = 20) 
 
     One row per episode: ticker, start, end (the last suspended day), days, outcome and `ret`, the return from the last price before the suspension
     to the price at the end of the story.
-    outcome  "resumed"               trading came back and the data goes on for more than `relist_days` trading days: ret is the price on the first
-                                      day of trading again over the price before the suspension
-             "resumed_then_delisted"  trading came back, but the security's last bar is within `relist_days` of that day (a liquidation window):
-                                      ret is its last price over the price before
-             "ended_in_halt"          the security's last bar is a suspended day (flagged in `delist_after`): the price never moved, ret is 0, and
-                                      the loss, if any, was never in the data
-             "ongoing"                still suspended on the last day of the panel; ret is NaN
+    A day without a price (NaN) ends a suspension, so a halt with a gap of missing prices inside it is cut into two episodes. A suspension that is already running
+    on the panel's first day has no price before it: such an episode is listed, but its `ret` is NaN, and its length is truncated.
+    outcome  "resumed"               the first priced day after the suspension, and the data goes on (or the security is not flagged in `delist_after`):
+                                      ret is that day's price over the price before the suspension. That day may itself have no volume if missing prices sit between.
+             "resumed_then_delisted"  the security is flagged in `delist_after` and its last bar falls within `relist_days` of that day (a liquidation window): ret is its
+                                      last price over the price before. Without the flag the same story is labeled "resumed".
+             "ended_in_halt"          the security's last bar is a suspended day and it is flagged in `delist_after`: the price never moved, ret is 0 (NaN if there is
+                                      no price before), and the loss, if any, was never in the data
+             "ongoing"                no priced day follows: either still suspended on the last day of the panel, or the data ends in the suspension without a delisting
+                                      flag; ret is NaN
     The point is to measure how often a position that cannot be sold is lost, instead of assuming it. Counts are small and depend on the market and
     the period; read the distribution of `ret`, not a mean."""
     c = panel.close
@@ -214,10 +221,12 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
     shares it implies need not be a multiple of the lot (a halted name does not move, so there it is).
 
     `cap_gross`: a position that cannot be traded ties up capital. Without this, new targets are added on top of it and the gross exposure can exceed the
-    target's. With it, the day's whole target is scaled by the largest k in [0, 1] for which the resulting gross exposure does not exceed the target's gross
-    (found by bisection; the stuck positions do not move, so in effect the free names shrink). A scaled target can turn a buy into a sell, which changes what is
-    blocked, so k is searched for rather than solved for. On a day with nothing blocked k is exactly 1 and the result is the same as without it. If the stuck
-    positions alone exceed the target gross, nothing can meet the cap: k is 0 and the day is counted in `infeasible_days`.
+    target's. With it, the day's whole target is scaled by a k in [0, 1], the largest one found by bisection for which the resulting gross exposure does not exceed
+    the gross of the day's target (after lot rounding, so rounding itself is never cut). A position that cannot be sold stays where it is; one that cannot be
+    bought stays too unless the scaled target falls below it, in which case it is sold down, so it can shrink. A scaled target can turn a buy into a sell, which
+    changes what is blocked, so k is searched for rather than solved for, and the feasible set being an interval [0, k] is not proven (no counter-example was found
+    in 653 random small cases). On a day with nothing blocked or skipped k is exactly 1 and the result is the same as without it, with or without `capital`. If the
+    stuck positions alone exceed the target gross, nothing can meet the cap: k is 0 and the day is counted in `infeasible_days`.
 
     Returns (positions, stats). `mean_stuck_weight` is the average over days of the weight held where the target said otherwise because a trade was
     blocked; `longest_freeze_days` the longest run of consecutive days a wanted trade in one name was blocked; `mean_free_scale` the average k (1 without `cap_gross`), `infeasible_days` the days on which the stuck positions alone exceeded the target gross."""
@@ -256,7 +265,7 @@ def realize(target: np.ndarray, can_buy: np.ndarray | None = None, can_sell: np.
         k = 1.0
         tgt, d, stay, blk = decide(raw0, t)
         if cap_gross:
-            budget = float(np.abs(raw0).sum()) + 1e-12
+            budget = float(np.abs(tgt).sum()) + 1e-12                       # what the day would hold with nothing in the way (after lot rounding)
 
             def gross_at(kk: float) -> float:
                 g_tgt, _, g_stay, g_blk = decide(raw0 * kk, t)

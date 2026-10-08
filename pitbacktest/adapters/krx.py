@@ -144,7 +144,8 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
     reflects a split or rights issue. When a security is **suspended and a consolidation or capital reduction happens meanwhile**, the first day of trading
     again carries a `change` against the old, unadjusted close, and the formula returns a move of thousands of percent that never happened (one case in the
     cache: 2,080 won to 625,000 won, +29,948%). Every daily return beyond +-100% is listed in `meta["suspect_returns"]` (ticker, date, return, and whether the
-    previous day was a suspension), 39 of 7.8 million in the cache, 14 of the upward ones on the first day after a suspension. `drop_suspect_above=1.0` treats
+    previous day had zero or missing volume): 38 of 7.8 million in the whole cache (from 2013; the largest is +6,699,900%), 14 of them on such a day, and 29 and 10 since June 2015.
+    All are upward: a return cannot go below -100%. `drop_suspect_above=1.0` treats
     such a day as a return of 0 (the price chain is cut there, the true move is unknown); the default None leaves the series as it was, so earlier results
     reproduce. The strategies in this repository do not hold suspended names (eligibility needs volume), so none of them was affected; a position that is
     **stuck** in a suspended name (`Panel.can_buy`/`can_sell`, `freeze_*`) can be."""

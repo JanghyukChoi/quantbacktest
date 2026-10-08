@@ -214,10 +214,12 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
     ledger      pitbacktest.ledger.Ledger. If given, this run is recorded in it, so the number of trials reaches the deflated Sharpe.
     freeze_days, freeze_return  A long position in a security whose suspension (a price but no volume) reaches `freeze_days` days is marked down once
-                by `freeze_return` (between -1 and 0), on the day it reaches that length. Short positions are not credited: the gain cannot be taken while the
+                by `freeze_return` (between -1 and 0): the loss is taken by the close of the `freeze_days`-th suspended day (booked on the signal row `entry_lag` days earlier). Short positions are not credited: the gain cannot be taken while the
                 security is frozen. A scenario, not a measurement: `execution.freeze_episodes` measures how suspensions ended in your data. None: no markdown.
     cap_gross   True: a position that cannot be traded (see `Panel.can_buy`) ties up capital, so the free names of that leg are scaled down to keep the leg's gross
                 exposure at its target instead of piling new positions on top (see `execution.realize`). Only matters where something is blocked. Off by default.
+                Metrics when masks exist: `mean_free_scale` (the average of the two legs' average k; 1 means nothing was scaled) and `cap_infeasible_days` (leg-days summed,
+                so a day on which both legs are infeasible counts twice).
     family      name that groups runs of one research question in the ledger. name labels this trial (the same label with other settings is another trial).
     delist_return  assumed return on the day **after** the last real bar of a security flagged in panel.delist_after.
                 None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
