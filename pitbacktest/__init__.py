@@ -17,11 +17,11 @@ from .core.gates import GateConfig
 from .event import backtest_event
 from .portfolio import backtest_portfolio, assert_timing
 from .screen import screen
-from . import validation, analytics
+from . import validation, analytics, execution
 from .ledger import Ledger
 from .weights import backtest_weights, capacity_curve, ImpactModel
 from .shorting import shortable_from_bans
 
 __version__ = "0.2.0"
-__all__ = ["shortable_from_bans", "validation", "analytics", "Ledger", "backtest_weights", "capacity_curve", "ImpactModel", "Panel", "build_pit_eligible", "GateConfig", "screen",
+__all__ = ["shortable_from_bans", "execution", "validation", "analytics", "Ledger", "backtest_weights", "capacity_curve", "ImpactModel", "Panel", "build_pit_eligible", "GateConfig", "screen",
            "backtest_event", "backtest_portfolio", "assert_timing"]

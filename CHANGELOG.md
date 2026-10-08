@@ -38,6 +38,12 @@
 - **Fixed**: averaging overlapping tranches (`hold > 1`) left rounding residue of about 1e-18 where the exact weight is 0, and `avg_positions` and
   `delist_events_held` counted every residue as a held position (on a synthetic panel `avg_positions` read 148.7 where the true figure is 100.9). The returns were
   not affected (the residue is 1e-18). Residue is now snapped to 0.
+- **Execution realism.** `Panel.can_buy` / `can_sell` (bool frames; what is missing counts as not possible) stop trades that cannot be done on the execution day, in both
+  engines. `execution.tradability` builds them from prices and volume (no price, no volume, a daily-limit lock; a position is settled after a flagged delisting and
+  after `max_gap_days` without any price). `execution.at_prices` trades at another price (the open). `backtest_weights` takes `capital`, `price`, `lot` and
+  `min_trade_value` for whole-lot sizes. New metrics: `blocked_trades`, `blocked_turnover_share`, `mean_stuck_weight`, `longest_freeze_days`, `min_trade_skipped`,
+  `mean_abs_rounding_gap`. The KRX and Tiingo panels record the real price level in `meta["raw_close"]`. No limit, lot size or minimum order ships with the library.
+  Found by running it on real data: refusing the exit from a delisted name froze 38% of one short leg for ever, and a Binance contract absent for 894 days kept a position alive.
 - **Changed**: `backtest_weights(check_universe=True)` now looks at long and short exposure separately, so turning a long into a smaller short in a name that is
   not eligible raises (it used to pass because the absolute weight shrank).
 - **Fixed (second independent review)**: `inject_delistings(hazard="illiquid")` raised `IndexError` on any panel whose first calendar year had 100 or more bars

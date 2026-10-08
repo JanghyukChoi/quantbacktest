@@ -123,6 +123,29 @@ tax_panel = krx.sell_tax_panel(krx_panel, {"KOSPI": [...], "KOSDAQ": [...]})    
 | `backtest_weights` raises when a short is opened or increased where it cannot be sold short (`check_shortable`) | A weight file that shorts during a ban is not a result |
 | **No rate table and no ban calendar ship with the library** | Rates, effective dates and exemptions are law and change; a wrong table is worse than none. Check them against the tax authority and the regulator's notices |
 
+## What can actually be traded
+
+Trading every position change at the close assumes the security was open, that its price was not locked at a daily limit, and that you
+can hold any fraction of a share. `Panel.can_buy` and `Panel.can_sell` state those assumptions as data, and both engines read them:
+
+```python
+from pitbacktest import execution as ex
+can_buy, can_sell = ex.tradability(panel, limit=0.30)       # halted = no price or no volume; a move of 29%+ locks the name (your market's limit)
+panel = replace(panel, can_buy=can_buy, can_sell=can_sell)
+r = q.backtest_portfolio(panel, factor)                      # a blocked trade does not happen; r.metrics["mean_stuck_weight"], ["longest_freeze_days"]
+w = q.backtest_weights(panel, weights, capital=1e8, price=real_prices, lot=1.0, min_trade_value=0.0)    # whole lots at the real price level
+r_open = q.backtest_portfolio(ex.at_prices(panel, "open"), factor)                                    # enter and mark at the open
+```
+
+| Choice | Why |
+|---|---|
+| Increasing a position needs `can_buy` and decreasing it needs `can_sell`, read on the execution day | A name locked at its upper limit has no sellers; one locked down has no buyers; a halted name has neither |
+| A blocked trade leaves the position as it was | You cannot get out of a name you cannot sell. The frozen weight is reported (`mean_stuck_weight`, `longest_freeze_days`) |
+| After a flagged delisting, and after `max_gap_days` (60) with no price at all, a position can be closed either way | The engines settle it (`delist_return`); refusing the exit froze 38% of one real short leg for ever |
+| A name with a price but no volume stays frozen | A Korean trading suspension is exactly that. Its return is 0 here, which is **optimistic** if it ends in a delisting |
+| Whole-lot sizes need the **real** price level (`meta["raw_close"]` in the KRX and Tiingo panels) | A back-adjusted series has an arbitrary level and gives wrong share counts |
+| **No limit, lot size or minimum order ships with the library** | They differ by market and change by rule. You pass the ones you have checked |
+
 ## Intraday bars (Binance, 1 minute and up)
 
 ```python
@@ -262,6 +285,7 @@ python tests/test_reconcile.py      # the engine against an independent loop imp
 python tests/test_ledger.py         # trial ledger: distinct configurations, DSR count from the record, tamper detection
 python tests/test_delisting_and_guards.py # a window that runs into a delisting keeps its loss; screen and backtest_event count delisted trades; intraday and cost guards
 python tests/test_side_costs_shorting.py # buy and sell costs, dated rates, short-selling limits, KRX sell-tax panel
+python tests/test_execution.py # halts, price limits, whole lots, minimum trade, trading at the open, frozen positions
 python tests/test_argument_checks.py # bad arguments raise a clear error instead of quietly running something else
 python tests/test_costs_events.py    # spread estimators, crypto costs, event signals and their neutralisation, FM with missing returns, panel checks
 python tests/test_yfinance_adapter.py # the free-data adapter against a fake yfinance: when it warns about survivorship, market-cap paths, errors
@@ -291,6 +315,7 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 | R1 to R7 | portfolio returns agree with a separate plain-loop implementation (long-short, long-only, delisting, funding), CAGR, Sharpe, drawdown and Sortino match textbook definitions, cost units are pinned, DSR and the permutation test do not reject noise more than they claim |
 | L1 to L4 | the ledger counts a repeated run once and any change as a new trial, its DSR equals the direct computation, editing or deleting a line breaks the hash chain, recording changes no number |
 | S1 to S9 | Buy and sell costs equal an independent loop for weights that change sign (to 1e-18); `backtest_portfolio` and `backtest_weights` agree with them, also when the legs empty and refill (the case where swapping the two rates matters); a dated rate is read per date; an unknown rate raises; the short leg is chosen among shortable names; shorts cannot be opened where they cannot be sold; a long turned into a smaller short outside the universe is caught; `shortable_from_bans` and `krx.sell_tax_panel` build the right frames. Eleven planted bugs are all caught |
+| X1 to X9 | Positions and net returns equal an independent loop when trades are blocked (buys and sells separately, at lag 0, 1 and 2); nothing blocked is bit for bit the old result; a frozen position is measured as counted by hand; a long or short in a delisted name is closed instead of frozen; whole lots at the real price equal a loop; a minimum trade value skips and counts trades; trading at the open equals the engine on a panel built from the open. Nine planted bugs are caught |
 | DG1 to DG3 | `Panel.forward` keeps the loss of a trade that runs into a delisting (hand-computed, with and without `delist_return`), `backtest_event` and `screen` count those trades, and the intraday, cost, hazard and short-panel guards hold. Ten planted removals are all caught |
 | AC1 to AC4 | bad arguments stop with a clear error (mistyped weighting or benchmark, quantiles outside (0, 1], short_q=0, hold below 1, a negative cost that used to turn a Sharpe of -1.01 into +0.96, a boolean factor, horizons, an impact model that makes no sense), and the `screen` default of 20 shuffled-null repetitions, since two repetitions give a threshold biased far below pure noise. Twenty planted removals are all caught |
 | CE1 to CE11 | Roll recovers a 2 cent spread, Corwin-Schultz a 40 bp one, the spread model its coefficients, the crypto cost model is exact, an event signal that only echoes a control keeps -8% of its effect after controls while a real 100 bp effect keeps 102%, Fama-MacBeth with missing returns equals a per-day least squares, the paired difference, panel validation and the point-in-time mask follow their documentation |
