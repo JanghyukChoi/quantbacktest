@@ -33,7 +33,7 @@ import pandas as pd
 
 from .core.costs import apply_turnover_cost
 from .core.panel import Panel
-from .portfolio import PortfolioResult, _benchmark_returns, _forward_arrays, metrics
+from .portfolio import PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, metrics
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,16 @@ class ImpactModel:
     vol_window: int = 20
     adv_window: int = 30
     max_cost_bp: float = 100.0  # cap per unit traded; also what a name without volatility or volume history is charged
+
+    def __post_init__(self) -> None:
+        if not (self.aum >= 0 and np.isfinite(self.aum)):
+            raise ValueError(f"aum must be a finite number of dollars, not negative, got {self.aum!r}")
+        if not (self.y >= 0 and np.isfinite(self.y)):
+            raise ValueError(f"y must be finite and not negative, got {self.y!r}")
+        if self.vol_window < 2 or self.adv_window < 1:
+            raise ValueError("vol_window must be at least 2 and adv_window at least 1")
+        if not (self.max_cost_bp >= 0):
+            raise ValueError(f"max_cost_bp must not be negative, got {self.max_cost_bp!r}")
 
 
 def _impact_cost(panel: Panel, H: np.ndarray, m: ImpactModel) -> tuple[np.ndarray, np.ndarray]:
@@ -76,6 +86,9 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, borr
     Costs are charged on the **net** trade per security. `backtest_portfolio` charges its long and short legs as separate sleeves,
     so feeding it its own overlapping-tranche holdings can come out slightly cheaper here (a name long in one tranche and short in
     another is netted); without such overlap the two agree exactly."""
+    _check_benchmark(benchmark)
+    _check_cost(spread_bp, "spread_bp")
+    _check_cost(borrow_bp, "borrow_bp")
     W = weights.reindex(index=panel.dates, columns=panel.tickers)
     raw = W.to_numpy(float)
     if np.isinf(raw).any():

@@ -139,6 +139,33 @@ def _benchmark_returns(panel: Panel, fwd: np.ndarray, kind: str) -> np.ndarray:
     return (_normalize(w) * fwd).sum(axis=1)
 
 
+def _check_cost(value, name: str) -> None:
+    """A cost must be a finite, non-negative number (or an array of them). A negative cost would pay you to trade."""
+    a = np.asarray(value, dtype=float)
+    if a.size and (np.nanmin(a, initial=np.inf) < 0 or np.isinf(a).any()):
+        raise ValueError(f"{name} must be finite and not negative (a negative cost would pay you for trading), got {np.nanmin(a):g}")
+
+
+def _check_benchmark(benchmark) -> None:
+    if benchmark not in ("cap", "equal", None):
+        raise ValueError(f"benchmark must be 'cap', 'equal' or None, not {benchmark!r}")
+
+
+def _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, benchmark) -> None:
+    if weighting not in ("equal", "signal", "rank"):
+        raise ValueError(f"weighting must be 'equal', 'signal' or 'rank', not {weighting!r}")
+    _check_benchmark(benchmark)
+    if not (0 < long_q <= 1):
+        raise ValueError(f"long_q must be in (0, 1], got {long_q!r}")
+    if short_q is not None and not (0 < short_q <= 1):
+        raise ValueError(f"short_q must be in (0, 1], or None for a long-only portfolio, got {short_q!r}")
+    if isinstance(hold, bool) or not isinstance(hold, (int, np.integer)) or hold < 1:
+        raise ValueError(f"hold must be a whole number of periods, at least 1, got {hold!r}")
+    _check_cost(spread_bp, "spread_bp")
+    if isinstance(factor, pd.DataFrame) and len(factor.columns) and (factor.dtypes == bool).all():
+        raise ValueError("a boolean factor is not a ranking: pass a numeric score, or use backtest_event for a yes/no signal")
+
+
 def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
                        hold: int = 5, weighting: str = "equal",
@@ -148,8 +175,8 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
     """Factor -> portfolio result.
 
-    factor      continuous factor (higher = long). A bool is read as a long-only firing.
-    long_q      long quantile (top q). short_q=None means long-only.
+    factor      numeric score (higher = long). A boolean frame is refused: use backtest_event for yes/no signals.
+    long_q      long quantile (top q), in (0, 1]. short_q is the short quantile; None means long-only (0 is refused).
     weighting   equal | signal (proportional to signal strength) | rank
     spread_bp   **Two units.** A scalar is a round-trip spread: each unit of weight traded pays spread_bp/2
                             (to use a one-way cost of c bp, pass 2*c). A (date x ticker) panel is a one-way cost in bp, multiplied
@@ -161,6 +188,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     delist_return  assumed return on the day **after** the last real bar of a security flagged in panel.delist_after.
                             None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
     """
+    _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, benchmark)
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
     rk = f.where(el).rank(axis=1, pct=True, na_option="keep")

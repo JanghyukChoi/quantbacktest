@@ -107,6 +107,10 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
     With the neutralisation test on (the default) the contribution after controls is re-measured with a **dummy regression**.
     An event signal is not a continuous factor, so it is read through a dummy coefficient and not through residuals.
     """
+    if not horizons or any(isinstance(h, bool) or not isinstance(h, (int, np.integer)) or h < 1 for h in horizons):
+        raise ValueError(f"horizons must be whole numbers of periods, at least 1, got {horizons!r}")
+    if not (cost_bp >= 0 and np.isfinite(cost_bp)):
+        raise ValueError(f"cost_bp must be finite and not negative, got {cost_bp!r}")
     sig = signal.reindex(index=panel.dates, columns=panel.tickers).fillna(False)
     fire = (sig.astype(bool) & panel.eligible).values
     ev = panel.eligible.values

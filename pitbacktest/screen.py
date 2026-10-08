@@ -65,6 +65,12 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     el = panel.eligible
     ev = el.values
     ctrl = build_controls(panel)
+    if not horizons or any(isinstance(h, bool) or not isinstance(h, (int, np.integer)) or h < 1 for h in horizons):
+        raise ValueError(f"horizons must be whole numbers of periods, at least 1, got {horizons!r}")
+    if primary_h not in horizons:
+        raise ValueError(f"primary_h={primary_h} must be one of horizons {tuple(horizons)}")
+    if not (cost_bp >= 0 and np.isfinite(cost_bp)):
+        raise ValueError(f"cost_bp must be finite and not negative, got {cost_bp!r}")
     fwd = {h: panel.forward(h) for h in horizons}
     cums = {h: fwd[h].values.astype(np.float64) for h in horizons}
 

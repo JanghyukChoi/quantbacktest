@@ -18,6 +18,11 @@
 - `pitbacktest.equity`: delisting scenarios, `survivors_only`, coverage report, strict long-format adapter.
 - Docstrings, comments, warnings and example output are now in English (the Korean left is the security-name filter and the quota message of the
   KRX adapter, which must match Korean text). Gate names and the `screen()` funnel keys are English too.
+- **Fixed (found while writing the specification)**: bad arguments used to run something else without a word. A mistyped `weighting` or `benchmark`
+  was read as another option, `long_q` outside (0, 1] ran, `short_q=0` silently meant long-only, `hold=0` gave a Sharpe of 0, a **negative cost paid the
+  strategy for trading** (a Sharpe of -1.01 became +0.96), and a boolean factor was documented as supported but was not. All of these now raise a
+  `ValueError` naming the argument; the same for `backtest_weights` (benchmark, negative costs, a nonsensical `ImpactModel`), `screen` (`primary_h`
+  not in `horizons`) and `backtest_event` (`horizons`, `cost_bp`).
 - **Fixed**: duplicate dates in `close` now raise the library's own clear message; before, pandas failed first with an opaque `reindex` error.
 - **Fixed**: the `backtest_event` warning about too few days described an old rule; it now states the adaptive pool threshold the code uses.
 - Test coverage 74% -> 85% (spread estimators, crypto costs, event signals and their dummy-regression neutralisation, the yfinance adapter's
