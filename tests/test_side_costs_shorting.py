@@ -8,6 +8,7 @@ S5 weights      opening or increasing a short where it cannot be done raises; ho
 S6 universe     turning a long into a smaller short in a name that is not eligible is now caught (it was not before)
 S7 bans         `shortable_from_bans` marks ban periods, exemptions and open-ended bans; unknown securities are not shortable
 S8 ledger       side costs reach the ledger configuration only when they are not zero
+S10 residue     averaging overlapping tranches leaves no rounding residue that `avg_positions` would count as a position
 S9 krx tax      `sell_tax_panel` gives each security the rate of its market on that day, including after a market move
 """
 from __future__ import annotations
@@ -247,7 +248,26 @@ def test_krx_sell_tax():
     print("S9 each security pays the rate of its market on that day, including after a move between markets; a missing market or date raises  PASS")
 
 
+def test_tranche_leaves_no_residue():
+    from pitbacktest.portfolio import _tranche
+    rng = np.random.default_rng(0)
+    w = np.zeros((600, 100))
+    for t in range(600):
+        w[t, rng.choice(100, 30, replace=False)] = 1 / 30                                        # 1/30 is not exact in binary: the residue shows
+    out = _tranche(w, 5)
+    ref = np.array([w[max(0, t - 4):t + 1].mean(axis=0) for t in range(600)])
+    assert np.abs(out - ref).max() < 1e-15
+    assert ((ref == 0) == (out == 0)).all(), "a rounding residue is counted as a position"
+    assert ((out > 0).sum(axis=1) == (ref > 0).sum(axis=1)).all()
+    p, f = _panel(seed=2, T=300, N=60)
+    r = q.backtest_portfolio(p, f, long_q=0.2, short_q=None, hold=5, benchmark=None, grid=False)       # long only: holdings are the long leg
+    exact = np.array([(r.holdings[t] > 0).sum() for t in range(len(r.holdings))])
+    assert abs(r.metrics["avg_positions"] - exact[exact > 0].mean()) < 1e-9
+    print("S10 averaging overlapping tranches leaves no rounding residue, so avg_positions counts real positions only  PASS")
+
+
 if __name__ == "__main__":
+    test_tranche_leaves_no_residue()
     test_side_cost_matches_a_loop()
     test_engines_agree_with_side_costs()
     test_schedule_and_unknown_rates()

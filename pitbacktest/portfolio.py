@@ -68,6 +68,10 @@ def _tranche(weights: np.ndarray, hold: int) -> np.ndarray:
             cnt -= 1
         if cnt > 0:
             out[d] = run / cnt
+    # Adding a tranche and subtracting it later leaves rounding residue (about 1e-18) where the exact weight is 0. A residue is not a position,
+    # but `held` and `avg_positions` count anything above 0, so snap it to 0. Real weights are many orders of magnitude larger than the tolerance.
+    tol = 1e-12 * float(np.abs(weights).max()) if weights.size else 0.0
+    out[np.abs(out) < tol] = 0.0
     return out
 
 

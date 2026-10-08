@@ -35,6 +35,9 @@
   (`check_shortable`). `shortable_from_bans` builds the frame from ban periods and exemptions. **No ban calendar and no tax table ship with the library.**
 - `adapters.krx.build_krx_panel` records the market of every security on every day in `meta`; `adapters.krx.sell_tax_panel` turns a rate schedule per market
   into a date x ticker panel for `sell_bp`.
+- **Fixed**: averaging overlapping tranches (`hold > 1`) left rounding residue of about 1e-18 where the exact weight is 0, and `avg_positions` and
+  `delist_events_held` counted every residue as a held position (on a synthetic panel `avg_positions` read 148.7 where the true figure is 100.9). The returns were
+  not affected (the residue is 1e-18). Residue is now snapped to 0.
 - **Changed**: `backtest_weights(check_universe=True)` now looks at long and short exposure separately, so turning a long into a smaller short in a name that is
   not eligible raises (it used to pass because the absolute weight shrank).
 - **Fixed (second independent review)**: `inject_delistings(hazard="illiquid")` raised `IndexError` on any panel whose first calendar year had 100 or more bars
