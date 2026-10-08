@@ -104,6 +104,7 @@ def test_suspect_returns_after_a_suspension():
     codes = [f"{(i + 1) * 10:06d}" for i in range(14)]
     px = {c: 10000.0 for c in codes}
     sus = "099990"; px[sus] = 2080.0
+    prev_close = 0                                                                      # the last close after the consolidation, set below
     with tempfile.TemporaryDirectory(prefix="krxtest-") as d:
         for t, day in enumerate(days):
             rows = []

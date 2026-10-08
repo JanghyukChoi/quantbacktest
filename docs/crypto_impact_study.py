@@ -49,7 +49,7 @@ def average_slippage(cum_notional: np.ndarray, q: float) -> float:
         return float("nan")
     qs = np.linspace(0, q, 2001)
     price = np.interp(qs, n, p)                       # price level reached after consuming qs
-    return float(np.trapezoid(price, qs) / q)
+    return float(np.sum((price[1:] + price[:-1]) * np.diff(qs)) / 2.0 / q)       # trapezoid rule; np.trapezoid exists only from numpy 2.0
 
 
 def implied_y(profile: pd.DataFrame, adv: float, sigma_daily: float, fractions=FRACTIONS) -> dict:
