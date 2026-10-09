@@ -21,7 +21,7 @@ from . import validation, analytics, execution
 from .ledger import Ledger
 from .weights import backtest_weights, capacity_curve, ImpactModel
 from .shorting import shortable_from_bans
+from ._version import __version__
 
-__version__ = "0.3.0"
 __all__ = ["shortable_from_bans", "execution", "validation", "analytics", "Ledger", "backtest_weights", "capacity_curve", "ImpactModel", "Panel", "build_pit_eligible", "GateConfig", "screen",
            "backtest_event", "backtest_portfolio", "assert_timing"]

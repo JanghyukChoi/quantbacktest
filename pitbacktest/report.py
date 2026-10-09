@@ -351,7 +351,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     spec_rows = "".join(f"<dt>{_esc(k)}</dt><dd>{_esc(v)}</dd>" for k, v in res.spec.items())
     conv = ("Returns are net of trading costs, borrow and funding, per bar. A signal on date d enters at close(d + entry_lag) and earns close(d + entry_lag) to close(d + entry_lag + 1). "
             "Costs are only as good as the inputs given; the engine has no order book, queue, partial fills or margin model. This page describes a simulation; it is not advice.")
-    from . import __version__
+    from ._version import __version__
     ttl = title or "Backtest report"
     badge = '<span class="badge">ruined</span>' if m.get("ruined") else ""         # built outside the f-string: a backslash in one needs Python 3.12
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"

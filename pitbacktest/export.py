@@ -89,7 +89,7 @@ def jsonable(x):
 
 
 def _header(kind: str, notes) -> dict:
-    from . import __version__
+    from ._version import __version__
     return {"schema": f"pitbacktest/{kind}", "schema_version": SCHEMA_VERSION, "library_version": __version__,
             "null_means": "not available or not computable (NaN or infinity), never zero", "notes": list(notes or [])}
 
