@@ -55,7 +55,7 @@ _JS = """
 var d=JSON.parse(fig.querySelector('script.cd').textContent),svg=fig.querySelector('svg'),cross=svg.querySelector('.cross'),tip=fig.querySelector('.tip'),dots=[];
 var NS='http://www.w3.org/2000/svg';
 d.series.forEach(function(s,i){var c=document.createElementNS(NS,'circle');c.setAttribute('r',4);c.style.fill=s.color;c.style.stroke='var(--surface)';c.style.strokeWidth='2';c.style.display='none';svg.appendChild(c);dots.push(c);});
-function fy(v){return d.t+(d.h-d.t-d.b)*(1-(v-d.ymin)/(d.ymax-d.ymin));}
+function fy(v){if(d.log)v=Math.log(v);return d.t+(d.h-d.t-d.b)*(1-(v-d.ymin)/(d.ymax-d.ymin));}
 function fmt(k,v){if(v===null)return 'n/a';if(k==='pct')return (v*100).toFixed(2)+'%';if(k==='eq')return v.toFixed(3);return v.toFixed(2);}
 function near(px){var lo=0,hi=d.xs.length-1;while(hi-lo>1){var m=(lo+hi)>>1;if(d.xs[m]<px)lo=m;else hi=m;}return Math.abs(d.xs[lo]-px)<=Math.abs(d.xs[hi]-px)?lo:hi;}
 svg.addEventListener('pointermove',function(e){var r=svg.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*d.w;if(x<d.l||x>d.w-d.r){hide();return;}
@@ -119,8 +119,15 @@ def _pick(ys: list[np.ndarray], k: int) -> np.ndarray:
     return np.array(sorted(keep))
 
 
+def _log_ticks(lo: float, hi: float) -> list[float]:
+    """Ticks 1, 2, 5 times a power of ten between lo and hi (positive numbers)."""
+    cand = [m * 10.0 ** e for e in range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1) for m in (1, 2, 5)]
+    out = [t for t in cand if lo * 0.999 <= t <= hi * 1.001]
+    return out if len(out) >= 3 else sorted(set(out + [m * 10.0 ** e for e in range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1) for m in (1, 1.5, 3)]))
+
+
 def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, height: int = 230, area: bool = False, zero_line: bool = False,
-           max_points: int = 900, xticks: list | None = None, xtickfmt=None, width: int = 760) -> str:
+           max_points: int = 900, xticks: list | None = None, xtickfmt=None, width: int = 760, logy: bool = False) -> str:
     """One line chart. `x` is a numeric array (milliseconds for dates); each series is {name, y, color, fmt}. `xfmt(value)` writes an x value as text."""
     W, H, L, R, T, B = width, height, 54, 18, 10, 24
     x = np.asarray(x, dtype=np.float64)
@@ -128,7 +135,11 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
     idx = _pick(full, max_points)
     xs = x[idx]
     ys = [y[idx] for y in full]
-    allv = np.concatenate([y[np.isfinite(y)] for y in ys]) if any(np.isfinite(y).any() for y in ys) else np.array([0.0, 1.0])
+    if logy:                                                              # the caller guarantees positive values; geometry is drawn on the log scale, values stay as they are
+        gys = [np.log(np.where(y > 0, y, np.nan)) for y in ys]
+    else:
+        gys = ys
+    allv = np.concatenate([y[np.isfinite(y)] for y in gys]) if any(np.isfinite(y).any() for y in gys) else np.array([0.0, 1.0])
     lo, hi = float(allv.min()), float(allv.max())
     if zero_line:
         lo, hi = min(lo, 0.0), max(hi, 0.0)
@@ -136,7 +147,13 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
         lo, hi = lo - 0.5, hi + 0.5
     pad = (hi - lo) * 0.06
     lo, hi = lo - pad, hi + pad
-    yt = _nice_ticks(lo, hi, 5)
+    if logy:
+        tick_vals = _log_ticks(math.exp(lo), math.exp(hi))
+        yt = [math.log(t) for t in tick_vals]
+        ylab = [f"{t:g}" for t in tick_vals]
+    else:
+        yt = _nice_ticks(lo, hi, 5)
+        ylab = None
     lo, hi = min(lo, yt[0]), max(hi, yt[-1])
     x0, x1 = float(xs[0]), float(xs[-1])
     if x1 <= x0:
@@ -144,9 +161,9 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
     px = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)          # noqa: E731
     py = lambda v: T + (H - T - B) * (1.0 - (v - lo) / (hi - lo))    # noqa: E731
     g = []
-    for t in yt:
+    for i_t, t in enumerate(yt):
         t0 = 0.0 if abs(t) < 1e-9 else t                                  # never write -0%
-        label = f"{t0 * 100:.0f}%" if yfmt == "pct" else (f"{t0:.2f}" if abs(t0) < 10 else f"{t0:.0f}")
+        label = ylab[i_t] if ylab else (f"{t0 * 100:.0f}%" if yfmt == "pct" else (f"{t0:.2f}" if abs(t0) < 10 else f"{t0:.0f}"))
         g.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{py(t):.1f}" y2="{py(t):.1f}"/><text x="{L - 6}" y="{py(t) + 4:.1f}" text-anchor="end">{_esc(label)}</text>')
     for t in (xticks if xticks is not None else [x0 + (x1 - x0) * k / 5 for k in range(6)]):
         if x0 <= t <= x1:
@@ -155,7 +172,7 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
     if zero_line and lo < 0 < hi:
         g.append(f'<line class="axis" x1="{L}" x2="{W - R}" y1="{py(0):.1f}" y2="{py(0):.1f}"/>')
     paths = []
-    for s, y in zip(series, ys):
+    for s, y in zip(series, gys):
         segs, cur = [], []
         for xv, yv in zip(xs, y):
             if np.isfinite(yv):
@@ -170,7 +187,7 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
                 base = py(0.0 if lo < 0 < hi else lo)
                 paths.append(f'<path d="{d} L{seg[-1][0]:.1f},{base:.1f} L{seg[0][0]:.1f},{base:.1f} Z" style="fill:{s["color"]};fill-opacity:.10;stroke:none"/>')
             paths.append(f'<path class="ln" d="{d}" style="stroke:{s["color"]}"/>')
-    data = {"w": W, "h": H, "l": L, "r": R, "t": T, "b": B, "x0": x0, "x1": x1, "ymin": lo, "ymax": hi, "xs": [round(float(v), 3) for v in xs],
+    data = {"w": W, "h": H, "l": L, "r": R, "t": T, "b": B, "x0": x0, "x1": x1, "ymin": lo, "ymax": hi, "log": bool(logy), "xs": [round(float(v), 3) for v in xs],
             "labels": [xfmt(v) for v in xs],
             "series": [{"name": s["name"], "color": s["color"], "fmt": s["fmt"], "y": [None if not np.isfinite(v) else round(float(v), 6) for v in y]}
                        for s, y in zip(series, ys)]}
@@ -276,7 +293,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
             d = ledger.deflated_sharpe(family, periods_per_year=ppy)
             ok = _ok(d.get("dsr")) and d["dsr"] >= 0.95
             items.append(("ok" if ok else "w", "Deflated Sharpe",
-                          f"{d['trials']} trials recorded in family '{family}'. Best trial Sharpe {_num(d['sharpe'])}; the best of {d['trials']} random strategies would show about {_num(d['sharpe_luck_benchmark'])} "
+                          f"{d['trials']} trials recorded in family '{family}'. The best trial in the family ('{d.get('best_name', '?')}', not necessarily this run) has Sharpe {_num(d['sharpe'])}; the best of {d['trials']} random strategies would show about {_num(d['sharpe_luck_benchmark'])} "
                           f"by luck. Probability the best one beats luck: {_pct(d['dsr'], 0)} ({'above' if ok else 'below'} the usual 95% bar)."))
         except Exception as ex:
             items.append(("w", "Deflated Sharpe", f"could not be computed from the ledger ({ex})"))
@@ -287,8 +304,11 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
         items.append(("w" if ci["lo"] <= 0 else "ok", "Sharpe interval", f"{_num(ci['sharpe'])}, 95% interval {_num(ci['lo'])} to {_num(ci['hi'])} "
                       f"(stationary block bootstrap, {len(s):,} bars); {'it includes 0: no evidence of an edge from this sample alone.' if ci['lo'] <= 0 else 'it excludes 0.'}"))
     if ab is not None and _ok(ab.get("alpha_t")):
-        items.append(("w" if abs(ab["alpha_t"]) < 2.5 else "ok", "Alpha against the benchmark", f"{_pct(ab.get('alpha_annual'))} a year, t = {_num(ab['alpha_t'])}, beta {_num(next(iter(ab['betas'].values()), {}).get('beta'))}. "
-                      "Newey-West t-values over-reject in finite samples (about 9% instead of 5%): read |t| below 2.5 as no evidence."))
+        t_a = ab["alpha_t"]
+        verdict = ("the alpha is significantly negative: the strategy lost against the benchmark beyond what chance explains" if t_a <= -2.5
+                   else "positive and above the 2.5 bar" if t_a >= 2.5 else "no evidence of alpha (|t| below 2.5)")
+        items.append(("ok" if t_a >= 2.5 else "w", "Alpha against the benchmark", f"{_pct(ab.get('alpha_annual'))} a year, t = {_num(t_a)}, beta {_num(next(iter(ab['betas'].values()), {}).get('beta'))}: {verdict}. "
+                      "Newey-West t-values over-reject in finite samples (about 9% instead of 5%), so 2.5 rather than 2 is the bar."))
     cls = "bad" if m.get("ruined") else ("ok" if all(k == "ok" for k, _, _ in items) else "")
     icon = {"w": "!", "ok": "✓", "bad": "✕"}
     lis = "".join(f'<li class="{k}"><span class="ic">{icon[k]}</span><span class="lab">{_esc(t)}.</span> {_esc(x)}</li>' for k, t, x in items)
@@ -306,8 +326,11 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     if res.benchmark_returns is not None:
         b = res.benchmark_returns.reindex(s.index).fillna(0.0)
         sers.append({"name": "Benchmark (no costs)", "y": (1.0 + b).cumprod().to_numpy(), "color": "var(--muted)", "fmt": "eq"})
+    allpos = np.concatenate([x_[np.isfinite(x_)] for x_ in (np.asarray(sr["y"], dtype=float) for sr in sers)])
+    wide = bool(len(allpos) and allpos.min() > 0 and allpos.max() / allpos.min() > 8.0)       # a fall from 1 to 0.1 is unreadable on a straight axis
     charts = [
-        _chart("equity", "Growth of 1 (net of costs and funding)", xms, sers, yfmt="num", xfmt=_date_fmt, height=260, max_points=max_points, xticks=ticks, xtickfmt=_year_fmt),
+        _chart("equity", "Growth of 1 (net of costs and funding)" + (", log scale" if wide else ""), xms, sers, yfmt="num", xfmt=_date_fmt, height=260, max_points=max_points, xticks=ticks,
+               xtickfmt=_year_fmt, logy=wide),
         _chart("drawdown", "Drawdown from the previous peak", xms, [{"name": "Drawdown", "y": dd.to_numpy(), "color": "var(--s2)", "fmt": "pct"}], yfmt="pct",
                xfmt=_date_fmt, area=True, zero_line=True, max_points=max_points, xticks=ticks, xtickfmt=_year_fmt, width=470, height=220),
         _chart("rolling", f"Rolling Sharpe ({win} bars, annualised)", xms, [{"name": "Rolling Sharpe", "y": roll.to_numpy(), "color": "var(--s1)", "fmt": "num"}], yfmt="num",

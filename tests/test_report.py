@@ -118,10 +118,35 @@ def test_shapes():
     print("RP5 no benchmark, a sample too short for annual figures, and a result with no returns behave; -0 is never printed  PASS")
 
 
+def test_alpha_sign_and_log_axis():
+    p, f, r = _result()
+    idx = r.net_returns.index
+    rng = np.random.default_rng(3)
+    b = pd.Series(rng.normal(0.0004, 0.01, len(idx)), index=idx)
+    bad = replace(r, net_returns=b - 0.002 + pd.Series(rng.normal(0, 0.0005, len(idx)), index=idx), benchmark_returns=b)
+    assert bad.alpha_beta()["alpha_t"] < -10
+    page = bad.report()
+    assert 'class="w"><span class="ic">!</span><span class="lab">Alpha against the benchmark.' in page and "significantly negative" in page, "a large negative alpha is not a good sign"
+    good = replace(r, net_returns=b + 0.002 + pd.Series(rng.normal(0, 0.0005, len(idx)), index=idx), benchmark_returns=b)
+    assert 'class="ok"><span class="ic">✓</span><span class="lab">Alpha against the benchmark.' in good.report()
+    # a long fall from 1 to about 0.01 is drawn on a log axis, with the values themselves unchanged in the data
+    falling = replace(r, net_returns=pd.Series(-0.005, index=idx), benchmark_returns=None)
+    c = _charts(falling.report())["equity"]
+    eq = (1 - 0.005) ** np.arange(1, len(idx) + 1)
+    assert c["log"] is True and abs(c["series"][0]["y"][-1] - eq[-1]) < 1e-6 and ", log scale" in falling.report() and "Math.log(v)" in falling.report()
+    assert -0.01 <= c["ymax"] < 0.5 and c["ymin"] < np.log(eq[-1])                           # the geometry is in log units: the top is about log(1) = 0, the bottom is below log(last value)
+    flat = replace(r, net_returns=pd.Series(0.0002, index=idx), benchmark_returns=None)
+    assert _charts(flat.report())["equity"]["log"] is False and ", log scale" not in flat.report()
+    wiped = pd.Series(-0.002, index=idx).copy(); wiped.iloc[300] = -1.0; wiped.iloc[301:] = 0.0                 # equity reaches 0: a log axis is impossible
+    assert _charts(replace(r, net_returns=wiped, benchmark_returns=None).report())["equity"]["log"] is False
+    print("RP6 a big negative alpha is not ticked as good; an equity curve that falls by more than 8x is drawn on a log axis with true values; a wiped-out curve stays linear  PASS")
+
+
 if __name__ == "__main__":
     test_numbers_and_determinism()
     test_thinning_keeps_extremes()
     test_escaping()
     test_limits_on_the_page()
     test_shapes()
+    test_alpha_sign_and_log_axis()
     print("report tests: all passed")
