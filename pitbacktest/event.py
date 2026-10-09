@@ -15,7 +15,7 @@ What is always decomposed
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -23,6 +23,7 @@ import pandas as pd
 from .core.controls import build_controls, xs_norm
 from .core.estimators import fama_macbeth, newey_west_t, paired_diff
 from .core.gates import GateConfig, fire_structure, run_gates
+from .core.notes import keep_warnings
 from .core.panel import Panel, check_alignment
 
 
@@ -34,6 +35,18 @@ class EventResult:
     structure: dict
     neutralized: dict | None
     lookahead: dict
+
+    notes: list = field(default_factory=list)   # the warnings the run raised (text), kept for programs that read the result
+
+    def to_dict(self) -> dict:
+        """The result as a JSON-ready dictionary (see `pitbacktest.export`)."""
+        from .export import event_to_dict
+        return event_to_dict(self)
+
+    def to_json(self, path=None, indent: int | None = 2) -> str:
+        """`to_dict()` as JSON text, or written to `path`."""
+        from .export import dump_json
+        return dump_json(self.to_dict(), path, indent)
 
 
 def _trade_stats(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
@@ -93,6 +106,7 @@ def _daily_excess(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
     return np.array(out)
 
 
+@keep_warnings
 def backtest_event(panel: Panel, signal: pd.DataFrame, *,
                    horizons: tuple[int, ...] = (1, 2, 5, 10, 21),
                    cost_bp: float = 20.0,

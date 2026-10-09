@@ -14,12 +14,13 @@ Costs
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
+from .core.notes import keep_warnings
 from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 
@@ -37,6 +38,18 @@ class PortfolioResult:
     holdings: np.ndarray | None = None   # (date x ticker) net target weights, per unit of capital in each leg
     net_returns: pd.Series | None = None  # daily net return series (after costs and funding), for DSR / PBO
     benchmark_returns: pd.Series | None = None  # return of the benchmark on the same dates (no costs), when one was asked for
+
+    notes: list = field(default_factory=list)   # the warnings the run raised (text), kept for programs that read the result
+
+    def to_dict(self, series: str = "monthly") -> dict:
+        """The result as a JSON-ready dictionary (see `pitbacktest.export`)."""
+        from .export import portfolio_to_dict
+        return portfolio_to_dict(self, series)
+
+    def to_json(self, path=None, indent: int | None = 2, series: str = "monthly") -> str:
+        """`to_dict()` as JSON text, or written to `path`."""
+        from .export import dump_json
+        return dump_json(self.to_dict(series), path, indent)
 
     def alpha_beta(self, factors=None, **kw) -> dict:
         """Regress the net returns on `factors` (default: the benchmark, a market proxy). See `analytics.alpha_beta`."""
@@ -213,6 +226,7 @@ def _side_config(buy_bp, sell_bp) -> dict:
     return out
 
 
+@keep_warnings
 def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
                        hold: int = 5, weighting: str = "equal",

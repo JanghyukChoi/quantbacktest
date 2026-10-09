@@ -46,6 +46,7 @@ import numpy as np
 import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
+from .core.notes import keep_warnings
 from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config, stop_at_ruin,
@@ -88,6 +89,7 @@ def _impact_cost(panel: Panel, H: np.ndarray, m: ImpactModel) -> tuple[np.ndarra
     return (trade * unit).sum(axis=1), np.where(trade > 0, part, np.nan)
 
 
+@keep_warnings
 def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_bp=0.0, sell_bp=0.0, borrow_bp=0.0,
                      impact: ImpactModel | None = None, funding: bool = True, delist_return: float | None = None,
                      benchmark: str | None = "cap", ledger=None, family: str = "default",

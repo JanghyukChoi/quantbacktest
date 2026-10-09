@@ -14,7 +14,7 @@ Principles
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -23,6 +23,7 @@ from .core.controls import build_controls, neutralize, xs_norm
 from .core.estimators import (decile_profile, fama_macbeth, newey_west_t,
                               shuffle_columns, shuffle_null)
 from .core.gates import GateConfig, fire_structure, run_gates
+from .core.notes import keep_warnings
 from .core.panel import Panel, check_alignment
 
 
@@ -33,6 +34,18 @@ class ScreenResult:
     survivors: list[str]
     funnel: dict
     summary: pd.DataFrame
+
+    notes: list = field(default_factory=list)   # the warnings the run raised (text), kept for programs that read the result
+
+    def to_dict(self) -> dict:
+        """The result as a JSON-ready dictionary (see `pitbacktest.export`)."""
+        from .export import screen_to_dict
+        return screen_to_dict(self)
+
+    def to_json(self, path=None, indent: int | None = 2) -> str:
+        """`to_dict()` as JSON text, or written to `path`."""
+        from .export import dump_json
+        return dump_json(self.to_dict(), path, indent)
 
 
 def _deploy(fire: np.ndarray, cum: np.ndarray, ev: np.ndarray,
@@ -53,6 +66,7 @@ def _deploy(fire: np.ndarray, cum: np.ndarray, ev: np.ndarray,
     return a, {"excess_bp": float(mu * 1e4), "net_bp": float(mu * 1e4 - cost_bp), "t": float(t)}
 
 
+@keep_warnings
 def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
            horizons: tuple[int, ...] = (1, 5, 20, 60),
            primary_h: int = 20, cost_bp: float = 20.0,
