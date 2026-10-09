@@ -76,6 +76,7 @@
   probability of backtest overfitting is lower with the edge; shuffled factors and random event signals do not survive the six gates; the exact causality check. Measured limit: an edge of Sharpe 1.5
   is not called real in the crypto sample (5.7 years).
 - **Gate false-discovery rate on real data.** `docs/gate_false_positives.py`: 60 shuffled factors through `screen` and 60 random yes/no signals through `backtest_event` in crypto and in the US
+- **Deflated Sharpe power.** `docs/dsr_power.py` simulates how often a planted edge among 40 tries is called real (Sharpe 1.0: 3, 15 and 52 percent at 5, 10 and 20 years; Sharpe 1.5: 19, 67 and 99 percent) and shows the rule is far stricter than its nominal 5 percent level (0 false discoveries in 600 runs). Documented in `docs/verification_status.md`, with the note that gate power on planted real signals is not measured.
   sample (and 40 and 40 in Korea): none survived the six gates (95 percent upper bound on the rate 4.9 and 7.2 percent). The first gate alone passed 14 of 160 (8.8 percent against a nominal 5), because the
   null threshold was built from 10 shuffles, which biases it low; the later gates removed all of them.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
