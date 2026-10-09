@@ -14,6 +14,7 @@ Timing convention (the only one used in the whole project)
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field, replace
 from typing import Iterable
 
@@ -63,6 +64,17 @@ class Panel:
         self.close = self.close.sort_index()
         if self.close.index.has_duplicates:                    # before any reindex, which would fail with a less helpful pandas message
             raise ValueError("close.index has duplicate dates")
+        if self.close.columns.has_duplicates:
+            dup = list(self.close.columns[self.close.columns.duplicated()][:3])
+            raise ValueError(f"close has duplicate ticker names (for example {dup}): a reindex by name would pick the wrong column")
+        px = self.close.to_numpy(dtype=np.float64, na_value=np.nan)
+        badpx = ~np.isnan(px) & ~(np.isfinite(px) & (px > 0))      # zero, negative and infinite prices (a halted name written as 0 by a vendor)
+        if badpx.any():
+            i, j = np.argwhere(badpx)[0]
+            warnings.warn(f"{int(badpx.sum())} prices are zero, negative or infinite (first: {self.close.columns[j]} on {self.close.index[i].date()}, value {px[i, j]!r}); "
+                          "they are treated as missing. Left in, a zero price makes a return of -100% followed by an infinite one", stacklevel=3)
+            self.close = self.close.where(~pd.DataFrame(badpx, index=self.close.index, columns=self.close.columns))
+        self._check_periods_per_year()
         self.eligible = self.eligible.reindex(
             index=self.close.index, columns=self.close.columns
         ).fillna(False).astype(bool)
@@ -81,6 +93,19 @@ class Panel:
             if v is not None:
                 setattr(self, k, v.reindex(index=self.close.index, columns=self.close.columns).fillna(False).astype(bool))
         self.validate()
+
+    def _check_periods_per_year(self) -> None:
+        """Warn when `periods_per_year` does not fit the spacing of the dates (weekly dates with the default 252 annualise by the wrong factor)."""
+        if len(self.close.index) < 3:
+            return
+        gap = self.close.index.to_series().diff().dropna().median()
+        if not gap or gap <= pd.Timedelta(0):
+            return
+        implied = pd.Timedelta(days=365.25) / gap
+        ratio = self.periods_per_year / implied
+        if ratio > 2.0 or ratio < 0.5:
+            warnings.warn(f"the dates are about {gap} apart (roughly {implied:.0f} bars a year) but periods_per_year={self.periods_per_year}: CAGR, Sharpe and "
+                          "volatility are annualised by that number, so set periods_per_year to the real number of bars in a year (52 for weekly, 12 for monthly)", stacklevel=3)
 
     def validate(self) -> None:
         """Raise ValueError if the panel breaks its invariants: the date index ascending and without duplicates, at least one eligible
@@ -304,3 +329,19 @@ def build_pit_eligible(close: pd.DataFrame, *, listed: pd.DataFrame | None = Non
     if exclude is not None:
         ok &= ~exclude.reindex_like(close).fillna(False).astype(bool)
     return ok.fillna(False)
+
+
+def check_alignment(panel: Panel, x, what: str) -> None:
+    """Refuse an input table whose dates or tickers do not line up with the panel, and warn when only part of it does.
+
+    The engines align a signal to the panel by label, and a label that is missing becomes NaN. A factor with other column names, transposed, or with a
+    different time zone then aligned to nothing, every score was NaN, no position was ever taken, and the result was an unremarkable Sharpe of 0.0."""
+    if not isinstance(x, pd.DataFrame):
+        raise ValueError(f"{what} must be a pandas DataFrame of dates x tickers, got {type(x).__name__}")
+    d_share = float(panel.dates.isin(x.index).mean())
+    t_share = float(panel.tickers.isin(x.columns).mean())
+    if d_share == 0.0 or t_share == 0.0:
+        raise ValueError(f"{what} has no date or no ticker in common with the panel (dates in common: {d_share:.0%}, tickers in common: {t_share:.0%}). "
+                         "Check that it is dates x tickers (not transposed), uses the same ticker names, and the same time zone handling as the panel")
+    if d_share < 0.5 or t_share < 0.5:
+        warnings.warn(f"{what} covers only {d_share:.0%} of the panel's dates and {t_share:.0%} of its tickers; the rest count as missing", stacklevel=3)

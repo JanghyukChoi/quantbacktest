@@ -36,8 +36,12 @@ def deflated_sharpe(R: np.ndarray, *, trials: int | None = None, periods_per_yea
     variants you did not keep in R (and say so honestly)."""
     R = np.asarray(R, dtype=np.float64)
     T, n = R.shape
-    sr_all = R.mean(axis=0) / R.std(axis=0, ddof=1)
-    j = int(np.nanargmax(sr_all))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sr_all = R.mean(axis=0) / R.std(axis=0, ddof=1)
+    if not np.isfinite(sr_all).any():
+        raise ValueError("no column of R has a usable Sharpe ratio: every column contains NaN or inf, or has zero variance (a strategy that never traded). "
+                         "Columns with a NaN are ignored, so drop or fill the NaN rows if all of them have one")
+    j = int(np.nanargmax(np.where(np.isfinite(sr_all), sr_all, np.nan)))
     x = R[:, j]
     sr = float(sr_all[j])
     z = (x - x.mean()) / x.std(ddof=0)

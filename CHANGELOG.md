@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1
+Found by running the engines on hostile inputs (zero and infinite prices, misaligned tables, leverage that wipes the account).
+- **Fixed: a zero or infinite price on a held security gave a daily return of 3.6e307** (the infinite return was turned into the largest float) and a Sharpe of 0.
+  A price that is zero, negative or infinite is now a missing price, with a warning. A vendor that writes a halted day as 0 hits this.
+- **Fixed: an account that lost 100 percent or more in a day went on compounding with negative equity** (a 30x long that falls 4 percent; CAGR, drawdown and Sharpe
+  described an account that could not exist). `backtest_portfolio` and `backtest_weights` now set that day to -100 percent and every later day to 0, warn, and report
+  `ruined` and `ruin_date` in `metrics`. This is not a margin or liquidation model: there is still no leverage interest and no maximum leverage.
+- **Fixed: a signal that did not line up with the panel gave a Sharpe of 0.0 and no error** (other ticker names, transposed, a time zone on one side only). `backtest_portfolio`,
+  `backtest_weights`, `backtest_event` and `screen` now refuse a table with no date or no ticker in common with the panel, say what to check, and warn when under half of
+  the dates or tickers match. A numpy array or a Series is refused with the type named.
+- `backtest_portfolio` refuses `long_q + short_q > 1` (the same security in both legs); duplicate ticker names in `Panel` raise.
+- New warnings: a daily move above +1000 percent on an eligible security (an unadjusted split or a bad price; the numbers are not changed), `periods_per_year` that
+  does not fit the date spacing (weekly dates with 252), and a result in which no position was ever held (an all-NaN or constant factor, zero weights, a capital below one lot).
+- `deflated_sharpe` says so when no column has a usable Sharpe ratio instead of "All-NaN slice encountered".
+- `ImpactModel.aum` is money in the currency of `close x volume` (it said dollars; for Korean stocks it is won).
+- Measured: `docs/dsr_power.py` (power of the deflated Sharpe on simulated edges) and `docs/gate_power.py` (power of the six gates on signals planted in the real crypto, US and
+  Korean panels), with the results in `docs/verification_status.md` and `docs/gate_power_results.md`.
+
 ## 0.2.0
 - **Renamed: the package and the import are now `pitbacktest`** (they were `quantbt`). The name `quantbt` on PyPI belongs to an unrelated
   project, and two distributions that share a top-level package would overwrite each other's files. The data cache directory

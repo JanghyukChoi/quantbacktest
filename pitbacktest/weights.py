@@ -39,21 +39,22 @@ If `panel.shortable` is given, opening or increasing a short in a security that 
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
-from .core.panel import Panel
+from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
-from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config,
+from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config, stop_at_ruin,
                         _side_label, metrics)
 
 
 @dataclass(frozen=True)
 class ImpactModel:
-    aum: float                 # dollars of capital
+    aum: float                 # money, in the currency of close x volume (dollars for US stocks and USDT contracts, won for KRX); participation = trade x aum / ADV
     y: float = 1.0             # coefficient of the square-root law
     vol_window: int = 20
     adv_window: int = 30
@@ -61,7 +62,7 @@ class ImpactModel:
 
     def __post_init__(self) -> None:
         if not (self.aum >= 0 and np.isfinite(self.aum)):
-            raise ValueError(f"aum must be a finite number of dollars, not negative, got {self.aum!r}")
+            raise ValueError(f"aum must be a finite amount of money (same currency as close x volume), not negative, got {self.aum!r}")
         if not (self.y >= 0 and np.isfinite(self.y)):
             raise ValueError(f"y must be finite and not negative, got {self.y!r}")
         if self.vol_window < 2 or self.adv_window < 1:
@@ -117,6 +118,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     freeze_return = check_freeze_return(freeze_return)
     bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
     sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
+    check_alignment(panel, weights, "weights")
     W = weights.reindex(index=panel.dates, columns=panel.tickers)
     raw = W.to_numpy(float)
     if np.isinf(raw).any():
@@ -188,10 +190,18 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     net = gross - spread - side - borrow - imp - fcost
 
     ppy = panel.periods_per_year
+    net, ruin = stop_at_ruin(net, cut)
+    if ruin is not None:
+        warnings.warn(f"the account lost 100% or more on {panel.dates[ruin].date()}: from that day the return is -100% and then 0 (a leveraged account would have been liquidated)", stacklevel=2)
     m = metrics(net[:cut], panel.dates, ppy)
+    m["ruined"] = ruin is not None
+    if float(np.abs(H[:cut]).sum()) == 0.0:
+        warnings.warn("no position was held on any day: the weights are all zero or NaN, or `capital` is too small to buy one lot of anything; "
+                      "the zero return is not a result", stacklevel=2)
+    m["ruin_date"] = None if ruin is None else str(panel.dates[ruin].date())
     tr = np.zeros_like(H)
     tr[1:] = np.abs(np.diff(H, axis=0))
-    m.update({"turnover_daily": float(0.5 * tr[:cut].sum(axis=1).mean()), "gross_CAGR": metrics(gross[:cut], panel.dates, ppy)["CAGR"],
+    m.update({"turnover_daily": float(0.5 * tr[:cut].sum(axis=1).mean()), "gross_CAGR": metrics(stop_at_ruin(gross, cut)[0][:cut], panel.dates, ppy)["CAGR"],
               "spread_annual_bp": float(spread[:cut].mean() * ppy * 1e4), "borrow_annual_bp": float(borrow[:cut].mean() * ppy * 1e4),
               "side_cost_annual_bp": float(side[:cut].mean() * ppy * 1e4),
               "impact_annual_bp": float(imp[:cut].mean() * ppy * 1e4), "funding_annual_bp": float(fcost[:cut].mean() * ppy * 1e4),

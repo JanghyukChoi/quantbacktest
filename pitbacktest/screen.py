@@ -23,7 +23,7 @@ from .core.controls import build_controls, neutralize, xs_norm
 from .core.estimators import (decile_profile, fama_macbeth, newey_west_t,
                               shuffle_columns, shuffle_null)
 from .core.gates import GateConfig, fire_structure, run_gates
-from .core.panel import Panel
+from .core.panel import Panel, check_alignment
 
 
 @dataclass
@@ -103,6 +103,7 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
 
     rows, detail = [], {}
     for name, raw in factors.items():
+        check_alignment(panel, raw, f"factor {name!r}")
         f = xs_norm(raw.reindex(index=panel.dates, columns=panel.tickers), el)
         fm = fama_macbeth(f, fwd, ctrl, el)
         rk = f.rank(axis=1, pct=True, na_option="keep")

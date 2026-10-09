@@ -43,6 +43,7 @@ def test_portfolio_arguments():
     _raises(lambda: run(long_q=float("nan")), "long_q")
     _raises(lambda: run(short_q=0.0), "short_q", "None for a long-only")
     _raises(lambda: run(short_q=-0.1), "short_q")
+    _raises(lambda: run(long_q=0.7, short_q=0.7), "long_q + short_q", "both legs")       # the same security long and short at once
     _raises(lambda: run(hold=0), "hold")
     _raises(lambda: run(hold=2.5), "hold")
     _raises(lambda: run(hold=True), "hold")
@@ -51,7 +52,7 @@ def test_portfolio_arguments():
     _raises(lambda: run(spread_bp=pd.DataFrame(-1.0, index=p.dates, columns=p.tickers).to_numpy()), "spread_bp")
     _raises(lambda: run(factor=(f.rank(axis=1, pct=True) >= 0.9)), "boolean factor", "backtest_event")
     # the boundary values and every documented option still run
-    for kw in (dict(long_q=1.0, short_q=None), dict(long_q=0.05, short_q=1.0), dict(hold=1), dict(spread_bp=0.0), dict(spread_bp=0),
+    for kw in (dict(long_q=1.0, short_q=None), dict(long_q=0.5, short_q=0.5), dict(hold=1), dict(spread_bp=0.0), dict(spread_bp=0),
                dict(weighting="equal"), dict(weighting="signal"), dict(weighting="rank"),
                dict(benchmark="cap"), dict(benchmark="equal"), dict(benchmark=None), dict(hold=np.int64(3))):
         with warnings.catch_warnings():

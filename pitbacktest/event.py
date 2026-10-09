@@ -23,7 +23,7 @@ import pandas as pd
 from .core.controls import build_controls, xs_norm
 from .core.estimators import fama_macbeth, newey_west_t, paired_diff
 from .core.gates import GateConfig, fire_structure, run_gates
-from .core.panel import Panel
+from .core.panel import Panel, check_alignment
 
 
 @dataclass
@@ -113,6 +113,7 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
         raise ValueError(f"horizons must be whole numbers of periods, at least 1, got {horizons!r}")
     if not (cost_bp >= 0 and np.isfinite(cost_bp)):
         raise ValueError(f"cost_bp must be finite and not negative, got {cost_bp!r}")
+    check_alignment(panel, signal, "signal")
     sig = signal.reindex(index=panel.dates, columns=panel.tickers).fillna(False)
     fire = (sig.astype(bool) & panel.eligible).values
     ev = panel.eligible.values

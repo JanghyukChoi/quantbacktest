@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
-from .core.panel import Panel
+from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 
 ANN = 252
@@ -83,6 +83,20 @@ def _normalize(mask_or_w: np.ndarray) -> np.ndarray:
     return np.where(np.isfinite(s), w / s, 0.0)
 
 
+def stop_at_ruin(net: np.ndarray, cut: int) -> tuple[np.ndarray, int | None]:
+    """An account that loses 100 percent or more in a day is gone: from the first such day (within the first `cut` rows) the return is -100 percent and
+    every later return is 0. Without this, compounding goes on with negative equity (a 30x long that falls 4 percent), and CAGR, drawdown and Sharpe describe an
+    account that could not exist (a real one is liquidated first). Returns the series and the row of the ruin, None when there is none. The input is not changed."""
+    bad = np.flatnonzero(np.asarray(net[:cut]) <= -1.0)
+    if bad.size == 0:
+        return net, None
+    i = int(bad[0])
+    out = np.array(net, dtype=np.float64, copy=True)
+    out[i] = -1.0
+    out[i + 1:] = 0.0
+    return out, i
+
+
 def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
     """Annualised figures of a net return series: CAGR, MDD, Sharpe, Sortino (downside deviation, target 0), Calmar, vol, years, the share of
     positive days and the drawdown dates. With fewer than `ann // 2` observations it warns and returns NaN for CAGR, MDD and Sharpe only."""
@@ -118,7 +132,13 @@ def _forward_arrays(panel: Panel, funding: bool, delist_return: float | None):
     fwdf[d]      funding rate over the same day (0 unless `funding` and the panel has it); positive means longs pay
     hit_next[d]  True where that day is the delisting day
     The last lag + 1 rows of fwd and fwdf are 0: their holding period is not in the sample."""
-    ret = np.nan_to_num(panel.ret1().values.astype(np.float64), nan=0.0)
+    ret = panel.ret1().values.astype(np.float64)
+    big = (ret > 10.0) & panel.eligible.to_numpy()
+    if big.any():
+        i, j = np.unravel_index(np.argmax(np.where(big, ret, -np.inf)), ret.shape)
+        warnings.warn(f"{int(big.sum())} daily moves above +1000% on eligible securities (largest: {panel.tickers[j]} on {panel.dates[i].date()}, {ret[i, j]:+.0%}); "
+                      "they are taken at face value. Look for an unadjusted split or consolidation or a bad price before believing the result", stacklevel=3)
+    ret = np.nan_to_num(ret, nan=0.0)
     nxt = np.zeros(ret.shape, dtype=bool)
     if panel.delist_after is not None:
         da = panel.delist_after.reindex(index=panel.dates, columns=panel.tickers).fillna(False).values.astype(bool)
@@ -169,6 +189,8 @@ def _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, b
         raise ValueError(f"long_q must be in (0, 1], got {long_q!r}")
     if short_q is not None and not (0 < short_q <= 1):
         raise ValueError(f"short_q must be in (0, 1], or None for a long-only portfolio, got {short_q!r}")
+    if short_q is not None and long_q + short_q > 1.0 + 1e-12:
+        raise ValueError(f"long_q + short_q = {long_q + short_q:g} is above 1: the same security would sit in both legs (long_q={long_q!r}, short_q={short_q!r})")
     if isinstance(hold, bool) or not isinstance(hold, (int, np.integer)) or hold < 1:
         raise ValueError(f"hold must be a whole number of periods, at least 1, got {hold!r}")
     _check_cost(spread_bp, "spread_bp")
@@ -229,6 +251,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     freeze_return = check_freeze_return(freeze_return)
     bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
     sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
+    check_alignment(panel, factor, "factor")
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
     rk = f.where(el).rank(axis=1, pct=True, na_option="keep")
@@ -289,10 +312,15 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     net = gross - cost - fcost
 
     cut = len(panel.dates) - (panel.entry_lag + 1)
+    net, ruin = stop_at_ruin(net, cut)
+    if ruin is not None:
+        warnings.warn(f"the account lost 100% or more on {panel.dates[ruin].date()}: from that day the return is -100% and then 0 (a leveraged account would have been liquidated); read CAGR and drawdown, not Sharpe, which no longer describes an account", stacklevel=2)
     m = metrics(net[:cut], panel.dates, panel.periods_per_year)
+    m["ruined"] = ruin is not None
+    m["ruin_date"] = None if ruin is None else str(panel.dates[ruin].date())
     m["turnover_daily"] = float(turn[:cut].mean())
     m["cost_annual_bp"] = float(cost[:cut].mean() * panel.periods_per_year * 1e4)
-    m["gross_CAGR"] = metrics(gross[:cut], panel.dates, panel.periods_per_year)["CAGR"]
+    m["gross_CAGR"] = metrics(stop_at_ruin(gross, cut)[0][:cut], panel.dates, panel.periods_per_year)["CAGR"]
     if fz is not None:
         m["freeze_markdown_annual_bp"] = float(mark[:cut].mean() * panel.periods_per_year * 1e4)        # negative: the return given up
         m["freeze_markdown_events"] = int(((hl > 0) & fz)[:cut].sum())
@@ -309,7 +337,11 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
         m["short_leg_empty_days"] = int((el.to_numpy(bool).any(axis=1) & ~el_s.to_numpy(bool).any(axis=1))[:cut].sum())   # eligible names exist, none can be sold short
     m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
     m["delist_events_held"] = int((held & hit_next)[:cut].sum())
-    m["avg_positions"] = float((hl > 0).sum(axis=1)[(hl > 0).sum(axis=1) > 0].mean())
+    npos = (hl > 0).sum(axis=1)
+    m["avg_positions"] = float(npos[npos > 0].mean()) if (npos > 0).any() else float("nan")
+    if not (npos > 0).any():
+        warnings.warn("no position was held on any day: the factor gave no usable score on eligible securities (all NaN, no ranking, or the legs came out empty), "
+                      "so the zero return below is not a result", stacklevel=2)
 
     bench = bexc = None
     bret = None
