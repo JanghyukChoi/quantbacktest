@@ -74,6 +74,31 @@ q.analytics.ic_report(panel, factor, horizons=(1, 5, 20), delist_return=-0.3)   
 q.analytics.sharpe_diff_ci(result_a.net_returns, result_b.net_returns)          # paired: is B really different from A?
 ```
 
+## Reviewing a strategy
+
+`result.report()` shows one run. A **review** asks whether it is luck, and runs the tests an institution would ask for, in the same order for a factor portfolio and for an event signal:
+
+```python
+rv = q.review_portfolio(panel, factor, long_q=0.2, short_q=0.2, hold=5, spread_bp=10,
+                        make_factor=lambda panel, lookback: -panel.close.pct_change(lookback), grid={"lookback": [3, 5, 10, 20], "hold": [1, 5, 10]})
+rv.report("review.html")                    # one page; rv.to_json() for a program
+
+ev = q.review_event(panel, signal, horizons=(1, 5, 20), cost_bp=20)     # an event signal is judged by its win rate against a random pick
+ev.report("review.html")
+```
+
+| Question | What is run | Portfolio | Event |
+|---|---|---|---|
+| Is it luck? | Newey-West t, Sharpe t, sign test, bootstrap interval; **permutation**: the factor shuffled across securities (before costs), or the same number of fires picked at random | yes | yes |
+| Against the market | excess CAGR, months beaten, up and down capture, beta, information ratio, worst relative fall | yes | as a portfolio |
+| What explains it | regression on the panel's own size, momentum, reversal, volatility, liquidity and market factors; the alpha left over | yes | |
+| Where did it come from | long against short, best and worst securities, concentration, thirds by size and liquidity, groups you supply, gross to net by cost | yes | win rate by liquidity, size, price level |
+| Does it hold | by year, by half, **walk-forward** of the choice of setting | yes | by year, with intervals |
+| Is the setting a spike | Sharpe over a grid, neighbours of the best, deflated Sharpe over the grid, probability of backtest overfitting | yes | by horizon |
+| Cost | Sharpe at several spreads; win rate at several costs | yes | yes |
+
+Every building block is also a function in `pitbacktest.robustness` (`walk_forward`, `factor_permutation`, `signal_permutation`, `market_relative`, `decompose`, `attribution`, `bh_fdr`, `holm`, ...), each checked against a worked answer. A permutation destroys one thing only: it says whether the ranking or the selection carries information, not whether the strategy is tradable.
+
 A result can be handed on as text or as a page, with the warnings the run raised kept with it (`result.notes`):
 
 ```python

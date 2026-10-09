@@ -13,6 +13,13 @@
   in each leg and in the currency of `close x volume`. The 25-cell `grid` is left out when an impact model is given. `ImpactModel` now lives in `pitbacktest.core.impact`
   (still importable from `pitbacktest.weights` and from `pitbacktest`).
 
+- **`review_portfolio` and `review_event`**: one call runs a strategy through the tests listed in the README (luck by permutation and t-tests, market-relative figures, factor decomposition,
+  attribution, walk-forward, settings, deflated Sharpe, probability of backtest overfitting, costs) and writes a page; the event review leads with the win rate against a random pick, and
+  can hold the signal as a portfolio (`event_weights`) to compare it with a factor. `pitbacktest.robustness` has the pieces: `market_relative`, `mean_tests`, `subperiods`,
+  `walk_forward`, `parameter_plateau`, `factor_permutation`, `signal_permutation`, `bh_fdr`, `holm`, `style_factor_returns`, `decompose`, `attribution`.
+- The permutation of a factor is **before costs**: shuffling each date independently destroys the persistence of the ranking, so shuffled portfolios turn over far more, and with costs in
+  the null a slow factor with no information at all beat it (p = 0.02). Found on real crypto data, where a losing reversal strategy came out "significant".
+
 ### Found by two independent reviews of 0.3.0 and fixed before release
 - **Warnings are kept per call, not by swapping the global filters.** The first version of `result.notes` replaced the process-wide warning filters while an engine ran: two engine
   calls in two threads could swap each other's warnings, and leave the filters changed so that later warnings disappeared; `-W error` let the engine finish (and write a ledger

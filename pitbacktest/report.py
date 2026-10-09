@@ -55,7 +55,7 @@ details summary{cursor:pointer;color:var(--ink2);font-size:13px}.foot{color:var(
 
 _JS = """
 (function(){document.querySelectorAll('figure.chart').forEach(function(fig){
-var d=JSON.parse(fig.querySelector('script.cd').textContent),svg=fig.querySelector('svg'),cross=svg.querySelector('.cross'),tip=fig.querySelector('.tip'),dots=[];
+var sc=fig.querySelector('script.cd');if(!sc)return;var d=JSON.parse(sc.textContent),svg=fig.querySelector('svg'),cross=svg.querySelector('.cross'),tip=fig.querySelector('.tip'),dots=[];
 var NS='http://www.w3.org/2000/svg';
 d.series.forEach(function(s,i){var c=document.createElementNS(NS,'circle');c.setAttribute('r',4);c.style.fill=s.color;c.style.stroke='var(--surface)';c.style.strokeWidth='2';c.style.display='none';svg.appendChild(c);dots.push(c);});
 function fy(v){if(d.log)v=Math.log(v);return d.t+(d.h-d.t-d.b)*(1-(v-d.ymin)/(d.ymax-d.ymin));}
@@ -122,6 +122,20 @@ def _pick(ys: list[np.ndarray], k: int) -> np.ndarray:
     return np.array(sorted(keep))
 
 
+def _compact(v: float) -> str:
+    """12,345 as 12.3k, 1,200,000 as 1.2M: an axis label must stay short."""
+    for div, suf in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if abs(v) >= div:
+            return f"{v / div:.3g}{suf}"
+    return f"{v:.0f}"
+
+
+def wide_range(arrays) -> bool:
+    """True when positive values span more than 8x (and stay within 1e-100..1e100): a log axis reads better than a straight one."""
+    allpos = np.concatenate([np.asarray(a, dtype=float)[np.isfinite(np.asarray(a, dtype=float))] for a in arrays]) if len(arrays) else np.array([])
+    return bool(len(allpos) and allpos.min() > 1e-100 and allpos.max() < 1e100 and allpos.max() / allpos.min() > 8.0)
+
+
 def _log_ticks(lo: float, hi: float) -> list[float]:
     """Ticks 1, 2, 5 times a power of ten between lo and hi (positive numbers)."""
     cand = [m * 10.0 ** e for e in range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1) for m in (1, 2, 5)]
@@ -156,7 +170,7 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
     if logy:
         tick_vals = _log_ticks(math.exp(lo), math.exp(hi))
         yt = [math.log(t) for t in tick_vals]
-        ylab = [f"{t:g}" for t in tick_vals]
+        ylab = [_compact(t) if t >= 1000 else f"{t:g}" for t in tick_vals]
     else:
         yt = _nice_ticks(lo, hi, 5)
         ylab = None
@@ -169,7 +183,7 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
     g = []
     for i_t, t in enumerate(yt):
         t0 = 0.0 if abs(t) < 1e-9 else t                                  # never write -0%
-        label = ylab[i_t] if ylab else (f"{t0 * 100:.0f}%" if yfmt == "pct" else (f"{t0:.2f}" if abs(t0) < 10 else f"{t0:.0f}"))
+        label = ylab[i_t] if ylab else (f"{t0 * 100:.0f}%" if yfmt == "pct" else (f"{t0:.2f}" if abs(t0) < 10 else _compact(t0)))
         g.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{py(t):.1f}" y2="{py(t):.1f}"/><text x="{L - 6}" y="{py(t) + 4:.1f}" text-anchor="end">{_esc(label)}</text>')
     for t in (xticks if xticks is not None else [x0 + (x1 - x0) * k / 5 for k in range(6)]):
         if x0 <= t <= x1:
@@ -265,8 +279,12 @@ def _year_table(s: pd.Series, ppy: int) -> str:
             + "".join(rows) + "</table></div>")
 
 
-def report_html(res, *, title: str | None = None, ledger=None, family: str | None = None, capacity: pd.DataFrame | None = None, max_points: int = 900) -> str:
-    """The report as one HTML string. `ledger` and `family` add the deflated Sharpe of the family's trials; `capacity` is the table from `capacity_curve`."""
+def report_html(res, *, title: str | None = None, ledger=None, family: str | None = None, capacity: pd.DataFrame | None = None, max_points: int = 900,
+                extra_items=(), after_curves: str = "", after_months: str = "", trials_item: bool = True) -> str:
+    """The report as one HTML string. `ledger` and `family` add the deflated Sharpe of the family's trials; `capacity` is the table from `capacity_curve`.
+
+    The last four arguments are for `review.report`: `extra_items` are further lines for "Read this first" (kind 'w', 'ok' or 'bad', title, text), `after_curves` and `after_months`
+    are HTML sections placed after those parts, and `trials_item=False` leaves out the "Trials not counted" line when the trials are counted by other means."""
     s = res.net_returns
     if s is None or len(s) == 0:
         raise ValueError("the result has no net_returns to report")
@@ -306,6 +324,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
         items.append(("bad", "Account wiped out", f"the account lost 100% or more on {m.get('ruin_date')}; the series is -100% on that bar and 0 afterwards. Read CAGR and drawdown, not Sharpe."))
     for n in getattr(res, "notes", []):
         items.append(("w", "Warning", n))
+    items.extend(extra_items)
     if ledger is not None and family is not None:
         try:
             d = ledger.deflated_sharpe(family, periods_per_year=ppy)
@@ -318,7 +337,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
                           f"by luck. Probability the best one beats luck: {_pct(d['dsr'], 0)} ({'above' if ok else 'below'} the usual 95% bar)."))
         except Exception as ex:
             items.append(("w", "Deflated Sharpe", f"could not be computed from the ledger ({ex})"))
-    else:
+    elif trials_item:
         items.append(("w", "Trials not counted", "No ledger was given, so this page cannot say how many variants were tried before this one. A Sharpe ratio picked as the best of many tries is "
                       "overstated; pass ledger= and family= to include the deflated Sharpe."))
     if ci is None:
@@ -349,8 +368,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     if res.benchmark_returns is not None:
         b = res.benchmark_returns.reindex(s.index).fillna(0.0)
         sers.append({"name": "Benchmark (no costs)", "y": (1.0 + b).cumprod().to_numpy(), "color": "var(--muted)", "fmt": "eq"})
-    allpos = np.concatenate([x_[np.isfinite(x_)] for x_ in (np.asarray(sr["y"], dtype=float) for sr in sers)])
-    wide = bool(len(allpos) and allpos.min() > 1e-100 and allpos.max() < 1e100 and allpos.max() / allpos.min() > 8.0)       # a fall from 1 to 0.1 is unreadable on a straight axis
+    wide = wide_range([sr["y"] for sr in sers])                                            # a fall from 1 to 0.1 is unreadable on a straight axis
     charts = [
         _chart("equity", "Growth of 1 (net of costs and funding)" + (", log scale" if wide else ""), xms, sers, yfmt="num", xfmt=xfmt, height=260, max_points=max_points, xticks=ticks,
                xtickfmt=tickfmt, logy=wide),
@@ -415,8 +433,8 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
             f"<p class=\"sub\">{xfmt(xms[0])} to {xfmt(xms[-1])} · {len(s):,} bars · pitbacktest {__version__}</p>"
             f"{read}<h2>Figures</h2><div class=\"tiles\">{tiles}</div>"
             f"<h2>Curves</h2><div class=\"card\">{charts[0]}</div><div class=\"two\" style=\"margin-top:12px\"><div class=\"card\">{charts[1]}</div><div class=\"card\">{charts[2]}</div></div>"
-            f"<h2>Months and years</h2><div class=\"card\">{_heat(mon)}</div><div class=\"card\" style=\"margin-top:12px\">{_year_table(s, ppy)}</div>"
-            f"<h2>Costs and exposure</h2>{costs}{cap}"
+            f"{after_curves}<h2>Months and years</h2><div class=\"card\">{_heat(mon)}</div><div class=\"card\" style=\"margin-top:12px\">{_year_table(s, ppy)}</div>"
+            f"{after_months}<h2>Costs and exposure</h2>{costs}{cap}"
             f"<h2>How it was run</h2><div class=\"card\"><dl>{spec_rows}</dl><p class=\"foot\" style=\"margin-bottom:0\">{_esc(conv)}</p></div>"
             f"<p class=\"foot\">Self-contained page: no network access, no scripts beyond the hover tooltips.</p></main><script>{_JS}</script></body></html>")
 
