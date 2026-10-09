@@ -367,6 +367,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
 
 
 def write_report(res, path, **kw) -> Path:
+    """Write `report_html(res, **kw)` to `path` (UTF-8) and return the path."""
     p = Path(path)
     p.write_text(report_html(res, **kw), encoding="utf-8")
     return p

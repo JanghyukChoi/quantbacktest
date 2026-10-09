@@ -11,6 +11,7 @@ import warnings
 
 
 def keep_warnings(fn):
+    """Decorator for an engine: run it, raise its warnings again (attributed to the caller), and store the text of its `UserWarning`s in `result.notes`."""
     @functools.wraps(fn)
     def inner(*args, **kwargs):
         notes: list[str] = []

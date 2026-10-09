@@ -129,6 +129,7 @@ def portfolio_to_dict(res, series: str = "monthly") -> dict:
 
 
 def event_to_dict(res) -> dict:
+    """`EventResult` as a JSON-ready dictionary: per-horizon trade statistics with their units, the gates, the signal's structure, the neutralised figures and the look-ahead check."""
     out = _header("event-result", getattr(res, "notes", []))
     out.update({"spec": jsonable(res.spec), "per_horizon": jsonable(res.per_horizon), "units": dict(EVENT_UNITS), "gates": jsonable(res.gates),
                 "structure": jsonable(res.structure), "neutralized": jsonable(res.neutralized), "lookahead": jsonable(res.lookahead)})
@@ -136,6 +137,7 @@ def event_to_dict(res) -> dict:
 
 
 def screen_to_dict(res) -> dict:
+    """`ScreenResult` as a JSON-ready dictionary: the survivors, the funnel, the shuffled-null thresholds, one summary row per factor and the full detail per factor."""
     out = _header("screen-result", getattr(res, "notes", []))
     out.update({"survivors": list(res.survivors), "funnel": jsonable(res.funnel), "null": jsonable(res.null), "summary": jsonable(res.summary),
                 "factors": jsonable(res.factors),
