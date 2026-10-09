@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+- **Results as JSON.** `result.to_dict()` and `result.to_json(path)` for `backtest_portfolio`, `backtest_weights`, `backtest_event` and `screen`: figures, the unit of each, the
+  run's settings and warnings, as plain JSON with no NaN (a figure that could not be computed is `null`). Layout versioned (`schema_version`), described in `pitbacktest.export`.
+  Meant for notebooks, other programs, and assistants that call the library as a tool.
+- **Warnings kept on the result.** `result.notes` holds the text of every warning the run raised; the console and `-W error` behave as before, and the warning now points at the
+  caller's line.
+- **A one-page report.** `result.report("report.html")`: what limits the number first (warnings, Sharpe interval, deflated Sharpe with a ledger, alpha against the benchmark),
+  then figures, equity, drawdown and rolling Sharpe with hover values, a monthly heatmap, a year table, costs and exposure, and the capacity table from `capacity_curve`.
+  One self-contained file, no dependency, light and dark. Thinning for drawing keeps each stretch's lowest and highest point.
+- **Market impact in `backtest_portfolio`.** `impact=ImpactModel(aum=..., y=...)`; the same holdings cost the same through `backtest_weights` (checked to 1e-12). `aum` is the money
+  in each leg and in the currency of `close x volume`. The 25-cell `grid` is left out when an impact model is given. `ImpactModel` now lives in `pitbacktest.core.impact`
+  (still importable from `pitbacktest.weights` and from `pitbacktest`).
+
 ## 0.2.1
 Found by running the engines on hostile inputs (zero and infinite prices, misaligned tables, leverage that wipes the account).
 - **Fixed: a zero or infinite price on a held security gave a daily return of 3.6e307** (the infinite return was turned into the largest float) and a Sharpe of 0.

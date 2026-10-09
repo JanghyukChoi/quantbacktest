@@ -74,6 +74,18 @@ q.analytics.ic_report(panel, factor, horizons=(1, 5, 20), delist_return=-0.3)   
 q.analytics.sharpe_diff_ci(result_a.net_returns, result_b.net_returns)          # paired: is B really different from A?
 ```
 
+A result can be handed on as text or as a page, with the warnings the run raised kept with it (`result.notes`):
+
+```python
+r.to_json("result.json")                   # figures, their units and the warnings as plain JSON: for a notebook, a program, or an assistant calling the library as a tool
+r.report("report.html")                    # one self-contained page: what limits the number first, then figures, curves, months and years, costs, capacity
+r.report("report.html", ledger=ledger, family="reversal", capacity=q.capacity_curve(panel, weights, aums=[1e6, 1e7, 1e8]))
+```
+
+The page needs nothing installed and fetches nothing: the charts are inline SVG with hover values, light and dark follow the reader's setting, and a long series is thinned for drawing
+without losing its worst drawdown. It opens with what limits the Sharpe ratio (the warnings, the bootstrap interval, the trial count when a ledger is given), because a number
+shown without its uncertainty invites the mistake the library exists to prevent.
+
 | Tool | Default that avoids a common mistake |
 |---|---|
 | `alpha_beta` | Newey-West errors with the plug-in lag; refuses constant or collinear factors; dates aligned on the intersection. Its t-statistics still over-reject in finite samples (9% instead of 5% in the A4 test), so read |t| below about 2.5 as no evidence |
@@ -99,6 +111,7 @@ q.capacity_curve(panel, weights, aums=[1e6, 5e6, 25e6, 100e6], y_values=(0.5, 1.
 | The impact coefficient is a parameter and the capacity function takes a list of them | Y is of order 1 in the literature but unknown for a given market; one capacity number would be false precision |
 | Unknown volatility or volume is charged the cap (100 bp per unit traded by default), never zero | A name you cannot size is not free to trade |
 | It reports participation (p99, max, share of trades above 10% of ADV) next to the cost | The square-root law is least reliable at high participation; look at both |
+| `backtest_portfolio(..., impact=ImpactModel(aum=...))` charges the same impact on a factor portfolio; `aum` is the money in each leg, in the currency of `close x volume` | The same holdings give the same cost through either function (pinned by `tests/test_portfolio_impact.py`) |
 | Costs are on the net trade per name | `backtest_portfolio` charges its two legs as separate sleeves; with overlapping tranches the two can differ by the netting saving |
 
 ## Taxes on one side, and short-selling limits

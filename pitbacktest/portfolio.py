@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
+from .core.impact import ImpactModel, _impact_cost
 from .core.notes import keep_warnings
 from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
@@ -50,6 +51,12 @@ class PortfolioResult:
         """`to_dict()` as JSON text, or written to `path`."""
         from .export import dump_json
         return dump_json(self.to_dict(series), path, indent)
+
+    def report(self, path=None, **kw):
+        """A one-page HTML report (see `pitbacktest.report`). Returns the HTML text, or writes it to `path` and returns the path. Keyword arguments: `title`, `ledger` and
+        `family` (adds the deflated Sharpe of the family's trials), `capacity` (the table from `capacity_curve`)."""
+        from .report import report_html, write_report
+        return report_html(self, **kw) if path is None else write_report(self, path, **kw)
 
     def alpha_beta(self, factors=None, **kw) -> dict:
         """Regress the net returns on `factors` (default: the benchmark, a market proxy). See `analytics.alpha_beta`."""
@@ -226,6 +233,10 @@ def _side_config(buy_bp, sell_bp) -> dict:
     return out
 
 
+def _impact_config(impact: ImpactModel) -> dict:
+    return {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window, "adv_window": impact.adv_window, "max_cost_bp": impact.max_cost_bp}
+
+
 @keep_warnings
 def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
@@ -233,7 +244,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        spread_bp=20.0, buy_bp=0.0, sell_bp=0.0, benchmark: str | None = "cap",
                        grid: bool = True, funding: bool = True,
                        delist_return: float | None = None, freeze_days: int | None = None, freeze_return: float = 0.0,
-                       cap_gross: bool = False, ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
+                       cap_gross: bool = False, impact: ImpactModel | None = None, ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
     """Factor -> portfolio result.
 
     factor      numeric score (higher = long). A boolean frame is refused: use backtest_event for yes/no signals.
@@ -248,6 +259,10 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                 opened). The rate is read on the signal date. A missing value raises: an unknown rate is not zero.
     benchmark   cap (market-cap weighted) | equal (equal weighted) | None
     funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
+    impact      `ImpactModel(aum=..., y=...)`: square-root market impact on the net trade of each security (needs `panel.volume`). `aum` is the money in **each leg**:
+                the returns are per unit of capital in each leg, so the book holds `aum` long and `aum` short, twice that gross. The currency is that of
+                `close x volume`. With it the result gains `impact_annual_bp` and the participation figures, and the 25-cell `grid` is left out (it has no
+                impact column). Costs on the net trade per security are what `backtest_weights` charges, so the same weights give the same impact in both.
     ledger      pitbacktest.ledger.Ledger. If given, this run is recorded in it, so the number of trials reaches the deflated Sharpe.
     freeze_days, freeze_return  A long position in a security whose suspension (a price but no volume) reaches `freeze_days` days is marked down once
                 by `freeze_return` (between -1 and 0): the loss is taken by the close of the `freeze_days`-th suspended day (booked on the signal row `entry_lag` days earlier). Short positions are not credited: the gain cannot be taken while the
@@ -323,7 +338,10 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
         fcost = fcost - (hs * fwdf).sum(axis=1)         # shorts receive it
         held = held | (hs > 0)
     cost = cost + side                                  # `cost_annual_bp` is every trading cost: spread and side costs
-    net = gross - cost - fcost
+    imp, part = np.zeros(len(gross)), None
+    if impact is not None:
+        imp, part = _impact_cost(panel, (hl - hs) if hs is not None else hl, impact)
+    net = gross - cost - fcost - imp
 
     cut = len(panel.dates) - (panel.entry_lag + 1)
     net, ruin = stop_at_ruin(net, cut)
@@ -339,6 +357,12 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
         m["freeze_markdown_annual_bp"] = float(mark[:cut].mean() * panel.periods_per_year * 1e4)        # negative: the return given up
         m["freeze_markdown_events"] = int(((hl > 0) & fz)[:cut].sum())
     m["side_cost_annual_bp"] = float(side[:cut].mean() * panel.periods_per_year * 1e4)   # the part of cost_annual_bp from buy_bp and sell_bp
+    if part is not None:
+        m["impact_annual_bp"] = float(imp[:cut].mean() * panel.periods_per_year * 1e4)       # not part of cost_annual_bp: the spread and side costs
+        pp = part[:cut][np.isfinite(part[:cut])]
+        m["participation_p99"] = float(np.percentile(pp, 99)) if len(pp) else float("nan")
+        m["participation_max"] = float(pp.max()) if len(pp) else float("nan")
+        m["trades_over_10pct_adv"] = float((pp > 0.10).mean()) if len(pp) else float("nan")
     if bo is not None:
         m["blocked_trades"] = int(ex["blocked_trades"])                  # name-days on which a wanted trade could not be done
         m["blocked_turnover_share"] = float(ex["blocked_turnover"] / ex["asked_turnover"]) if ex["asked_turnover"] > 0 else 0.0
@@ -369,7 +393,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     yr = s.groupby(s.index.year).apply(lambda g: float((1 + g).prod() - 1))
 
     g = None
-    if grid:
+    if grid and impact is None:
         g = {}
         for h in (1, 2, 5, 10, 21):
             hl2 = execute(_tranche(leg(long_q, True), h), 1.0, False)
@@ -390,6 +414,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             "spread_bp": spread_bp if np.isscalar(spread_bp) else array_fingerprint(spread_bp),
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
             **_side_config(bb, sb), **({"freeze_days": int(freeze_days), "freeze_return": freeze_return} if freeze_days is not None else {}), **({"cap_gross": True} if cap_gross else {}),
+            **({"impact": _impact_config(impact)} if impact is not None else {}),
             "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
@@ -397,6 +422,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
               "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp flat",
               "buy_bp": _side_label(bb), "sell_bp": _side_label(sb),
               "freeze": None if freeze_days is None else {"days": int(freeze_days), "return": freeze_return},
+              "impact": None if impact is None else _impact_config(impact),
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,

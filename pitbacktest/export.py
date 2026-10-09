@@ -42,6 +42,7 @@ PORTFOLIO_UNITS = {
     "avg_positions": "mean number of securities held on bars with a position (backtest_portfolio)",
     "avg_gross_exposure": "mean sum of absolute weights (backtest_weights)",
     "avg_net_exposure": "mean sum of signed weights (backtest_weights)",
+    "participation_max": "largest single trade as a share of the security's average daily traded value, with the AUM given to the impact model",
     "participation_p99": "99th percentile of a trade's size as a share of the security's average daily traded value, with the AUM given to the impact model",
     "trades_over_10pct_adv": "share of trades above 10 percent of the average daily traded value",
 }
