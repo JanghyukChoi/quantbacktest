@@ -66,6 +66,15 @@
 - **One validation on real data in three markets.** `docs/market_validation.py` runs the same checks on KRX, the US Tiingo sample and Binance USDT-M (shuffled-factor calibration, timing canaries,
   cost monotonicity, determinism, identities of the realism options with plain results, realism metrics, data sanity) and writes `docs/market_validation.md`; the exit code is non-zero if a check
   fails. Method only: no factor's performance is reported. All checks pass at the commit it names.
+- **An exact look-ahead check.** `Panel.assert_causal(make_signal)` rebuilds a signal from the panel cut at random dates and requires the last row to equal the full-data row: any use of
+  the future (negative shift, centred window, whole-history mean or z-score, rank across time) is caught, a past-only signal always passes. `Panel.truncate(date)` is the cut. The old
+  `assert_no_lookahead` heuristic is kept but its docstring now states its blind spots, found on real data: it **passes** a signal that is the future return itself and **flags** a legitimate
+  signal whose own edge is negative. Its own test (T3) had been written to accept a miss.
+- **Fixed (KRX adapter)**: the raw files write open, high and low as 0 on a day without trades; the panel now has NaN there (it had 0, which made trading at the open produce infinite
+  returns). `execution.at_prices` treats any non-positive price as missing. Found by the real-data check that open, high and low are positive.
+- **More real-data validation** (`docs/market_validation.py`, V8): the deflated Sharpe does not call the best of 40 shuffled strategies real and does call a planted edge of Sharpe 3 real; the
+  probability of backtest overfitting is lower with the edge; shuffled factors and random event signals do not survive the six gates; the exact causality check. Measured limit: an edge of Sharpe 1.5
+  is not called real in the crypto sample (5.7 years).
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.

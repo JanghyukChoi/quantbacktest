@@ -13,6 +13,8 @@ non-zero if one fails. The performance level of the test factor (a 5-day reversa
   V4 determinism the same inputs give the same result to the last bit; the data fingerprint is stable
   V5 identities  masks that are all True, a gross cap with nothing blocked and no freeze option give exactly the plain result (on real data)
   V6 realism     the trade masks, the suspension markdown and the gross cap run, and their metrics are finite and consistent
+  V8 overfitting the deflated Sharpe does not call the best of 40 shuffled strategies real and does call a planted strong edge real; the overfitting probability is lower with the
+                 edge; shuffled factors and random event signals do not survive the six gates; the exact causality check passes a past-only signal and fails look-ahead ones
   V7 data        prices are positive and returns finite, nothing is duplicated; in the cleaned KRX series no return beyond +100% is left (the others only report the count)
 
 The shuffled null uses 40 seeds: with a nominal 5 percent and the bootstrap's known 93 percent coverage the number of rejections should be 0 to 8 (a binomial band
@@ -56,10 +58,12 @@ def build(market: str):
         full = os.path.expanduser("~/.cache/quantbt/tiingo_full")
         plain = os.path.expanduser("~/.cache/quantbt/tiingo")
         names = sorted(f[:-5] for f in os.listdir(plain) if f.endswith(".json"))
-        n_full = len([f for f in os.listdir(full) if f.endswith(".json")]) if os.path.isdir(full) else 0
-        store = full if n_full >= len(names) else plain                      # the full-field store is used only once it holds every ticker
+        # the full-field store is used only once every ticker is recorded there, as data (.json) or as "the API has nothing now" (.none)
+        done = os.path.isdir(full) and all(os.path.exists(f"{full}/{n}.json") or os.path.exists(f"{full}/{n}.none") for n in names)
+        store = full if done else plain
+        with_data = sum(os.path.exists(f"{full}/{n}.json") for n in names) if done else len(names)
         P = tiingo.build_tiingo_panel(store, load_us_master(), names, start="2013-01-01")
-        return P, dict(limit=None, label=f"US Tiingo sample 2013- ({'full fields' if store == full else 'close only'}, {len(names)} tickers)")
+        return P, dict(limit=None, label=f"US Tiingo sample 2013- ({'full fields' if store == full else 'close only'}, {with_data} of {len(names)} tickers with data)")
     if market == "crypto":
         from pitbacktest.crypto import ArchiveStore, panel as cp
         root = os.path.expanduser("~/.cache/quantbt/binance_um")
@@ -87,12 +91,13 @@ def run_market(market: str) -> dict:
         return q.backtest_portfolio(p, f, spread_bp=spread, **{**kw, **extra})
 
     # V1 null
-    rej, shs = 0, []
+    rej, shs, rets = 0, [], []
     for s in range(N_SEEDS):
         r = run(P, shuffle_columns(rev, P.eligible, np.random.default_rng(s)), spread=0.0)
         ci = r.sharpe_ci(n=300)
         rej += not (ci["lo"] <= 0 <= ci["hi"])
         shs.append(r.metrics["Sharpe"])
+        rets.append(r.net_returns)
     se = np.std(shs, ddof=1) / np.sqrt(N_SEEDS)
     check("V1 null: Sharpe intervals that exclude 0", REJECT_BAND[0] <= rej <= REJECT_BAND[1], f"{rej} of {N_SEEDS} (band {REJECT_BAND[0]} to {REJECT_BAND[1]})")
     check("V1 null: mean Sharpe near 0", abs(np.mean(shs)) <= 3 * se, f"mean {np.mean(shs):+.3f}, standard error {se:.3f}")
@@ -120,6 +125,42 @@ def run_market(market: str) -> dict:
     a, b = run(P, rev), run(P, rev)
     check("V4 determinism: two runs are identical", np.array_equal(a.net_returns.to_numpy(), b.net_returns.to_numpy()), "net returns equal to the last bit")
     check("V4 determinism: the data fingerprint is stable", P.fingerprint() == replace(P).fingerprint(), P.fingerprint())
+
+    # V8 overfitting and bias tools on real data
+    R = pd.concat(rets, axis=1).dropna().to_numpy()
+    dn = q.validation.deflated_sharpe(R, periods_per_year=ppy)
+    check("V8a overfitting: the best of 40 shuffled strategies is not called real by the deflated Sharpe", dn["dsr"] < 0.95,
+          f"deflated Sharpe {dn['dsr']:.3f} (must stay under 0.95); its own Sharpe {dn['sharpe']:.2f} against a luck benchmark of {dn['sharpe_luck_benchmark']:.2f}")
+    sd = R.std(axis=0, ddof=1).mean()
+    plant = R.copy()
+    plant[:, 0] = R[:, 0] + 3.0 * sd / np.sqrt(ppy)                                   # one strategy given a true edge of Sharpe 3 (a strong one, to test the power)
+    dp = q.validation.deflated_sharpe(plant, periods_per_year=ppy)
+    check("V8a overfitting: a planted edge of Sharpe 3 among the 40 is called real", dp["best"] == 0 and dp["dsr"] > 0.95, f"deflated Sharpe {dp['dsr']:.3f}, best column {dp['best']}")
+    plant15 = R.copy()
+    plant15[:, 0] = R[:, 0] + 1.5 * sd / np.sqrt(ppy)
+    d15 = q.validation.deflated_sharpe(plant15, periods_per_year=ppy)
+    pn, pp_ = q.validation.pbo_cscv(R, periods_per_year=ppy)["pbo"], q.validation.pbo_cscv(plant, periods_per_year=ppy)["pbo"]
+    check("V8a overfitting: the probability of backtest overfitting is lower with a planted edge than with noise only", pp_ < pn, f"noise {pn:.2f}, planted {pp_:.2f}")
+    print(f"  info V8a overfitting: a planted edge of Sharpe 1.5 gives a deflated Sharpe of {d15['dsr']:.2f} ({'called real' if d15['dsr'] > 0.95 else 'not called real'}): the power of the test at this sample length", flush=True)
+    out["numbers"].update(dsr_noise=float(dn["dsr"]), dsr_planted3=float(dp["dsr"]), dsr_planted15=float(d15["dsr"]), pbo_noise=float(pn), pbo_planted3=float(pp_))
+    nulls = {f"sh{s}": shuffle_columns(rev, P.eligible, np.random.default_rng(1000 + s)) for s in range(8)}
+    sr = q.screen(P, nulls, horizons=(5,), primary_h=5, n_null=10, neutralize_all=False, cost_bp=20.0)
+    check("V8b gates: shuffled factors through `screen` do not survive the six gates", len(sr.survivors) <= 1, f"{len(sr.survivors)} of 8 survived (at most 1 allowed); {sr.funnel.get(next((k for k in sr.funnel if k.startswith('G1')), 'all'), '?')} passed the first gate")
+    rngs = np.random.default_rng(77)
+    n_pass = 0
+    for s in range(6):
+        sig = pd.DataFrame(rngs.random(c.shape) < 0.02, index=c.index, columns=c.columns) & P.eligible
+        ev = q.backtest_event(P, sig, horizons=(5,), cost_bp=20.0, neutralize_check=False)
+        n_pass += int(bool(ev.gates["passed"]))
+    check("V8c gates: random yes/no signals through `backtest_event` do not survive the six gates", n_pass <= 1, f"{n_pass} of 6 passed (at most 1 allowed)")
+    f_ok = lambda x: -x.close.pct_change(5, fill_method=None)
+    f_leak = lambda x: x.close.shift(-5) / x.close - 1
+    f_z = lambda x: (x.close.pct_change(fill_method=None) - np.nanmean(x.close.pct_change(fill_method=None).to_numpy())) / np.nanstd(x.close.pct_change(fill_method=None).to_numpy())
+    ok1, ok2, ok3 = P.assert_causal(f_ok, n_cuts=4), P.assert_causal(f_leak, n_cuts=4), P.assert_causal(f_z, n_cuts=4)
+    check("V8d causality: a signal built from the past passes the exact check, the future return and a full-sample z-score fail it", ok1["pass"] and not ok2["pass"] and not ok3["pass"],
+          f"past-only pass={ok1['pass']}, future return pass={ok2['pass']}, full-sample z-score pass={ok3['pass']}")
+    leak_h = P.assert_no_lookahead(f_leak(P), h=5)
+    print(f"  info V8d causality: the weak heuristic `assert_no_lookahead` on the future-return factor says pass={leak_h['pass']} (a blind spot; the exact check above is what to use)", flush=True)
 
     # V5 identities
     allok = pd.DataFrame(True, index=P.dates, columns=P.tickers)
@@ -202,6 +243,9 @@ def write_report(results: list[dict]) -> None:
     for k, lab, fmt in (("blocked_buy_share_of_eligible", "Eligible name-days on which a buy was blocked (halt or limit lock)", ".3%"), ("blocked_turnover_share", "Share of the turnover asked for that was blocked", ".1%"),
                         ("mean_stuck_weight", "Mean weight held where the target said otherwise (units of capital, both legs)", ".3f"), ("longest_freeze_days", "Longest run of days a wanted trade in one name was blocked", "d"),
                         ("gross_without_cap", "Mean gross exposure with trade masks, no cap", ".3f"), ("gross_with_cap", "Mean gross exposure with the gross cap", ".3f"),
+                        ("dsr_noise", "Deflated Sharpe of the best of 40 shuffled strategies (must stay under 0.95)", ".3f"), ("dsr_planted3", "Deflated Sharpe with a planted edge of Sharpe 3 (must exceed 0.95)", ".3f"),
+                        ("dsr_planted15", "Deflated Sharpe with a planted edge of Sharpe 1.5 (the power at this sample length; not a pass rule)", ".3f"),
+                        ("pbo_noise", "Probability of backtest overfitting, noise only", ".2f"), ("pbo_planted3", "Probability of backtest overfitting, with the planted edge", ".2f"),
                         ("returns_beyond_100pct", "Daily returns beyond +100% in the panel", "d"), ("delist_flags", "Securities flagged as delisted", "d")):
         lines.append(f"| {lab} | " + " | ".join(num(r, k, fmt) for r in results) + " |")
     lines += ["", "## Limits", "",

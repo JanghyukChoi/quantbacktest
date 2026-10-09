@@ -173,7 +173,11 @@ be traded. The archive has bars, not an order book, so there is no queue, no par
 
 ## Install
 
-Not on PyPI yet (the planned name is `pitbacktest`; import it as `pitbacktest`). From a clone:
+```bash
+pip install pitbacktest           # from PyPI; import it as `pitbacktest`. pandas and numpy are the only requirements
+```
+
+Status: **alpha**. No human has reviewed it yet; read `docs/verification_status.md` first. From a clone:
 
 ```bash
 pip install -e .                  # pandas and numpy are the only requirements

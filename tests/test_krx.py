@@ -4,6 +4,7 @@ K1 survivorship  a stock that was listed on day t but is gone later is in the pa
 K2 split         a 50:1 split (raw price falls 98%) leaves the adjusted return unchanged
 K3 listing day   the first bar of a new listing has no return, and the stock waits `min_age_days` to be eligible
 K4 code reuse    a code that comes back after a long gap becomes a different security
+K7 no trades     a day without trades has no open, high or low (NaN, not 0)
 K6 suspension   a consolidation during a suspension makes a huge false return: it is listed, kept by default, cut on request
 K5 resumable     a second fetch calls the API zero times; a quota error stops cleanly and keeps what was saved
 """
@@ -148,9 +149,39 @@ def test_suspect_returns_after_a_suspension():
     print("K6 a consolidation during a suspension gives a +29,948% return: listed, kept by default, cut on request, and nothing else changes  PASS")
 
 
+def test_no_trade_days_have_no_intraday_price():
+    """K7 a day without trades is written with open, high and low 0: that is no price. The panel makes it NaN, the close stays, and trading at the open stays finite."""
+    import tempfile
+    from pitbacktest import execution as ex
+    days = pd.bdate_range("2021-01-04", periods=80)
+    rng = np.random.default_rng(8)
+    codes = [f"{(i + 1) * 10:06d}" for i in range(14)]
+    px = {c: 10000.0 for c in codes}
+    with tempfile.TemporaryDirectory(prefix="krxtest-") as d:
+        for t, day in enumerate(days):
+            rows = []
+            for c in codes:
+                idle = (c == codes[0] and 30 <= t < 36)                                    # codes[0] does not trade for six days
+                nw = px[c] * (1 + (0 if idle else rng.normal(0, 0.01)))
+                rows.append(dict(code=c, name=f"N{c}", market="KOSPI", close=int(nw), change=int(nw - px[c]), open=0 if idle else int(nw), high=0 if idle else int(nw * 1.01),
+                                 low=0 if idle else int(nw * 0.99), volume=0 if idle else 1_000_000, value=0 if idle else int(5e9), mktcap=int(nw * 1e7), shares=10_000_000))
+                px[c] = nw
+            pd.DataFrame(rows).to_pickle(f"{d}/{day:%Y%m%d}.pkl")
+        P = krx.build_krx_panel(d, min_age_days=5, adv_window=5, min_value_krw=1e6)
+        idle = P.open.index[30:36]
+        assert P.open.loc[idle, codes[0]].isna().all() and P.high.loc[idle, codes[0]].isna().all() and P.low.loc[idle, codes[0]].isna().all()
+        assert P.close.loc[idle, codes[0]].notna().all()                                   # the close (carried) is still there
+        assert (P.open.stack().dropna() > 0).all() and (P.high.stack().dropna() > 0).all() and (P.low.stack().dropna() > 0).all()
+        assert P.open.loc[P.dates[10], codes[1]] > 0 and abs(P.open.loc[P.dates[10], codes[1]] / P.close.loc[P.dates[10], codes[1]] - 1) < 0.05   # a trading day keeps its open
+        r = ex.at_prices(P, "open").close.pct_change(fill_method=None)
+        assert np.isfinite(r.to_numpy()[~np.isnan(r.to_numpy())]).all()
+    print("K7 a day without trades has no open, high or low (NaN, not 0); the close stays; trading at the open has no infinite return  PASS")
+
+
 if __name__ == "__main__":
     import warnings; warnings.filterwarnings("ignore")
     test_adapter()
     test_quota_stops_cleanly()
     test_suspect_returns_after_a_suspension()
+    test_no_trade_days_have_no_intraday_price()
     print("krx tests: all passed")

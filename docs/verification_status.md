@@ -28,10 +28,13 @@ and was treated as one security; false returns of thousands of percent when a co
 | Trade masks, shorting limits, lots and minimum orders, open execution, suspension markdown, gross cap | loops, planted bugs, real data in three markets, review | moderate to strong; see the assumptions below |
 | Impact model | hand computations; the visible order book bounds Y (`docs/crypto_impact_check.md`) | moderate: not calibrated against executions |
 | Deflated Sharpe, PBO, permutation test, trial ledger | noise fails, a real edge passes, tampering is detected | moderate: little use on real research |
-| `screen`, `backtest_event`, the six gates | synthetic tests and shuffled-null thresholds | **weak to moderate**: not part of the three-market validation. In the documentation's own example the event signal passes every gate on synthetic data with no signal |
+| `screen`, `backtest_event`, the six gates | synthetic tests and shuffled-null thresholds; on real data in three markets, shuffled factors and random event signals do not survive the gates (V8b, V8c) | **moderate**: false positives measured on 8 shuffled factors and 6 random signals per market, which is a small number. In the documentation's own example the event signal still passes every gate on synthetic data with no signal |
+| Deflated Sharpe, PBO | on real return distributions: the best of 40 shuffled strategies is not called real, a planted Sharpe 3 edge is (V8a); a planted Sharpe 1.5 edge is called real in Korea (about 10 years) and the US sample, not in crypto (5.7 years) | **moderate**: weak edges are missed when the sample is short |
+| `Panel.assert_causal` (exact look-ahead check) | known-answer tests with 7 causal and 7 leaking factors, planted bugs; on real data a past-only signal passes and a future return fails (V8d) | strong for what it checks: only the signal function, not the data |
+| `Panel.assert_no_lookahead` (heuristic) | measured on real data | **weak**: misses a future-return signal, flags a legitimate one with a negative edge. Use `assert_causal` |
 | Korean adapter | offline fake API, full real history, defects found and fixed | strong |
 | Binance adapter, intraday | fake network; minute bars equal Binance's own daily files for two contract-months | moderate |
-| US adapter (Tiingo sample) | offline; a 466-ticker random sample | **weak to moderate**: bankruptcies are almost absent (0 of 12 checked); the open, high, low and dividend path has been run on real data only if the line below says so |
+| US adapter (Tiingo sample) | offline; a 466-ticker random sample; the full path with open, high, low and dividends ran on real data in `docs/market_validation.md` (465 tickers with data, 813,344 bars, all checks pass) | **moderate**: bankruptcies are almost absent (0 of 12 checked), so survivorship bias is only bounded from below |
 | `adapters.long_format` (CRSP, Sharadar, Norgate files) | tests only | **weak**: never run on real paid data |
 | `adapters.yfinance` | offline | weak by design: not point in time, and it warns |
 
@@ -44,8 +47,8 @@ and was treated as one security; false returns of thousands of percent when a co
    A stuck position frees no capital unless `cap_gross` is used, and then only by scaling the free names.
 5. **Statistics:** heavy tails, regime changes and strongly correlated sectors were not tested against the shuffled null; the null is one factor family at one cost level.
 6. **Impact coefficient Y** is not calibrated against real executions, only bracketed by the visible book (the rise of Y with size in that note is built in by the interpolation).
-7. **The US data path with open, high, low and dividends** (`fetch_symbols(full=True)`) was exercised by tests; its first run on the full real sample is in the report of the next
-   validation. Until that report says it passed, treat it as not verified on real data.
+7. **The US free sample is small and has almost no bankruptcies.** The path with open, high, low and dividends (`fetch_symbols(full=True)`) passes on the 465 tickers with data;
+   a result on a different or larger sample is not covered. One ticker (an expired warrant) returned nothing and is recorded as such.
 8. **Order book, queues, partial fills, liquidation, margin, borrow availability and per-name borrow fees** are not simulated.
 9. **Survivorship:** the US free data cannot show bankruptcies; any US result is a lower bound on survivorship bias. Korean data are survivorship-free; Binance keeps delisted contracts.
 10. **Operating system:** Linux only.

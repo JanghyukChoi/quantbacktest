@@ -14,7 +14,7 @@ Timing convention (the only one used in the whole project)
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 import numpy as np
@@ -153,9 +153,51 @@ class Panel:
         return (self.close * self.volume).rolling(window, min_periods=window).mean()
 
     # ---------------------------------------------------------------- safeguards
+    def truncate(self, last: pd.Timestamp) -> "Panel":
+        """A copy that holds only the rows up to and including `last`: what a user standing on that date would have had."""
+        cut = lambda f: None if f is None else f.loc[:last]
+        return replace(self, close=self.close.loc[:last], eligible=self.eligible.loc[:last], open=cut(self.open), high=cut(self.high), low=cut(self.low),
+                       volume=cut(self.volume), mkt_cap=cut(self.mkt_cap), funding=cut(self.funding), delist_after=cut(self.delist_after),
+                       shortable=cut(self.shortable), can_buy=cut(self.can_buy), can_sell=cut(self.can_sell),
+                       chars={k: v.loc[:last] for k, v in self.chars.items()})
+
+    def assert_causal(self, make_signal, n_cuts: int = 6, seed: int = 0, min_history: int = 300, rtol: float = 1e-9) -> dict:
+        """The exact look-ahead check: a signal that is a function of the panel must not change when the future is removed.
+
+        `make_signal(panel)` returns the (date x ticker) signal. For `n_cuts` random dates t (at least `min_history` rows in, so that rolling windows are full) the signal is
+        rebuilt from the panel truncated at t, and its last row must equal the row of the full-data signal at t, name by name (NaN equal to NaN). Any use of a later row
+        (a negative shift, a centred window, a mean or standard deviation over the whole history, a rank across time) makes the rows differ.
+        Returns {"pass", "cuts", "mismatched_cuts", "max_abs_diff"}. It checks that the function is causal; it does not say the signal is good, and it cannot see look-ahead in
+        the *data* itself (a price already revised), only in how the signal is computed. It needs the function, not a frame: that is what makes it exact."""
+        full = make_signal(self)
+        if not isinstance(full, pd.DataFrame):
+            raise ValueError("make_signal must return a (date x ticker) DataFrame")
+        n = len(self.dates)
+        if n <= min_history + 1:
+            raise ValueError(f"the panel has {n} rows; at least {min_history + 2} are needed to cut it")
+        rng = np.random.default_rng(seed)
+        cuts = sorted(int(i) for i in rng.choice(np.arange(min_history, n - 1), size=min(n_cuts, n - 1 - min_history), replace=False))
+        bad, worst = [], 0.0
+        for i in cuts:
+            t = self.dates[i]
+            part = make_signal(self.truncate(t))
+            a = part.iloc[-1].reindex(self.tickers).to_numpy(float)
+            b = full.loc[t].reindex(self.tickers).to_numpy(float)
+            same_nan = np.isnan(a) == np.isnan(b)
+            both = ~np.isnan(a) & ~np.isnan(b)
+            diff = float(np.max(np.abs(a[both] - b[both]) / (np.abs(b[both]) + 1e-12))) if both.any() else 0.0
+            worst = max(worst, diff)
+            if (not same_nan.all()) or diff > rtol:
+                bad.append(str(t.date()))
+        return {"pass": not bad, "cuts": [str(self.dates[i].date()) for i in cuts], "mismatched_cuts": bad, "max_abs_diff": worst}
+
     def assert_no_lookahead(self, signal: pd.DataFrame, h: int = 5,
                             n_null: int = 8, seed: int = 0) -> dict:
-        """Look-ahead detection: if the result improves when the signal is pushed one day **later**, it is looking at the future.
+        """A weak heuristic for look-ahead; prefer `assert_causal`, which is exact. If the result improves when the signal is pushed one day **later**, it is looking at the future.
+
+        **Known blind spots, measured on real data (see docs/market_validation.md):** a signal that is the future return itself is **not** flagged (delaying it by a day
+        makes it worse, not better), and a legitimate signal whose own edge is negative **is** flagged (delaying shrinks the loss, which reads as an improvement).
+        Treat a pass as "no evidence", never as proof, and a fail on a signal with a negative edge as possibly false.
 
         A normal signal gets worse when delayed (the information decays).
         If it improves after the delay, the signal already contains future information.

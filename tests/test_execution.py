@@ -464,6 +464,9 @@ def test_at_prices():
         w_new = {j: 1 / len(names) for j in names}; w_old = {j: 1 / len(old) for j in old}
         cost += sum(abs(w_new.get(j, 0) - w_old.get(j, 0)) for j in set(w_new) | set(w_old)) * 10.0 / 2 / 1e4
     assert abs((gross - cost) - r.net_returns.to_numpy()[t]) < 1e-12, (gross - cost, r.net_returns.to_numpy()[t])
+    zero = op.copy(); zero.iloc[60, 3] = 0.0; zero.iloc[61, 3] = -1.0                      # a zero or negative price is no price: never an infinite return
+    rz = ex.at_prices(replace(p, open=zero), "open").close.pct_change(fill_method=None).to_numpy()
+    assert np.isfinite(rz[~np.isnan(rz)]).all() and np.isnan(ex.at_prices(replace(p, open=zero), "open").close.iloc[60, 3])
     _raises(lambda: ex.at_prices(p, "open"), "no 'open'")
     print("X7 trading at the open equals the engine on a panel built from the open, and day 120 equals a hand computation  PASS")
 

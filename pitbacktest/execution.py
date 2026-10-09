@@ -176,14 +176,15 @@ def freeze_episodes(panel: Panel, *, min_days: int = 20, relist_days: int = 20) 
 def at_prices(panel: Panel, price="open") -> Panel:
     """A copy of `panel` whose prices are another series, so that a position is entered and marked at it. `price` is the name of a panel
     field (`"open"`, `"high"`, `"low"`) or a (date x ticker) frame. With the open, a signal from the close of day d is entered at the open
-    of d+lag and held to the open of d+lag+1. Only `close` changes: eligibility, volume and the rest were built from the original
+    of d+lag and held to the open of d+lag+1. A price that is zero or negative is treated as missing. Only `close` changes: eligibility, volume and the rest were built from the original
     closes, and `screen` and `backtest_event` still compute their controls from whatever `close` now holds."""
     px = getattr(panel, price) if isinstance(price, str) else price
     if px is None:
         raise ValueError(f"the panel has no {price!r}")
     if not isinstance(px, pd.DataFrame):
         raise ValueError("price must be a field name or a (date x ticker) frame")
-    return replace(panel, close=px.reindex(index=panel.dates, columns=panel.tickers))
+    px = px.reindex(index=panel.dates, columns=panel.tickers)
+    return replace(panel, close=px.where(px > 0))                # a zero or negative price is no price: the engines treat a missing price as a return of 0, a zero would give infinity
 
 
 def exec_masks(panel: Panel):

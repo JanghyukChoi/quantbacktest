@@ -203,7 +203,12 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
     for s in close.columns:
         if last[s] is not None and last[s] < close.index[-1] - pd.Timedelta(days=5):
             da.loc[last[s], s] = True
-    p = Panel(close=adj, eligible=ok, open=mat("open") * k, high=mat("high") * k, low=mat("low") * k,
+    def intraday(c: str) -> pd.DataFrame:
+        """Open, high or low adjusted to the close's level. The raw files write 0 on a day without trades (volume 0), which is no price: it becomes NaN."""
+        m = mat(c)
+        return (m * k).where(m > 0)
+
+    p = Panel(close=adj, eligible=ok, open=intraday("open"), high=intraday("high"), low=intraday("low"),
               volume=value / adj, mkt_cap=mat("mktcap"), market="KR", periods_per_year=245, entry_lag=entry_lag,
               delist_after=da)
     n = ok.sum(axis=1)
