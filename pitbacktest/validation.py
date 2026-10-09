@@ -47,7 +47,11 @@ def deflated_sharpe(R: np.ndarray, *, trials: int | None = None, periods_per_yea
     z = (x - x.mean()) / x.std(ddof=0)
     skew, kurt = float((z ** 3).mean()), float((z ** 4).mean())
     k = trials or n
-    var = float(np.nanvar(sr_all, ddof=1)) if n > 1 else 0.0
+    usable = sr_all[np.isfinite(sr_all)]                              # a constant column (infinite Sharpe) or a column with a NaN is no trial to deflate against
+    if len(usable) < 2 and k > 1:
+        raise ValueError(f"only {len(usable)} column(s) of R have a usable Sharpe ratio, so the variance of the trials' Sharpe ratios, which the deflation needs, "
+                         "cannot be estimated: pass at least two (or trials=1 for a single strategy)")
+    var = float(np.var(usable, ddof=1)) if len(usable) > 1 else 0.0
     sr0 = math.sqrt(var) * ((1 - _EULER) * _N.inv_cdf(1 - 1 / k) + _EULER * _N.inv_cdf(1 - 1 / (k * math.e))) if k > 1 else 0.0
     denom = math.sqrt(max(1e-12, 1 - skew * sr + (kurt - 1) / 4 * sr * sr))
     dsr = _N.cdf((sr - sr0) * math.sqrt(T - 1) / denom)

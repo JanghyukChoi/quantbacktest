@@ -1,8 +1,8 @@
 """Results as plain JSON.
 
 `result.to_dict()` and `result.to_json()` give a dictionary of numbers, dates and text with nothing from pandas or numpy in it, so that a report writer, a notebook,
-or a program that calls the library as a tool (for example an assistant over MCP) can read a result without knowing the library's classes. Every figure carries its unit
-in `units`, and the warnings the run raised are in `notes`. `null` means not available or not computable (NaN or infinity in Python); it is never a zero.
+or a program that calls the library as a tool (for example an assistant over MCP) can read a result without knowing the library's classes. Each figure whose
+definition has been checked carries its unit in `units` (a figure with no entry there has no unit written yet, not no unit), and the warnings the run raised are in `notes`. `null` means not available or not computable (NaN or infinity in Python); it is never a zero.
 
 The layout is versioned (`schema_version`). Fields are added, not renamed, within a version."""
 from __future__ import annotations
@@ -42,6 +42,16 @@ PORTFOLIO_UNITS = {
     "avg_positions": "mean number of securities held on bars with a position (backtest_portfolio)",
     "avg_gross_exposure": "mean sum of absolute weights (backtest_weights)",
     "avg_net_exposure": "mean sum of signed weights (backtest_weights)",
+    "freeze_markdown_annual_bp": "the return given up to the one-off markdown of frozen positions, in basis points of capital per year (negative)",
+    "freeze_markdown_events": "number of long positions marked down once for a suspension",
+    "delist_events_held": "number of positions held on the day a security was delisted",
+    "nan_weights_treated_as_zero": "number of NaN weights that were read as 0 (backtest_weights)",
+    "blocked_trades": "number of security-days on which a wanted trade could not be done (halt, price limit)",
+    "blocked_turnover_share": "traded weight that was blocked as a fraction of the weight asked for",
+    "longest_freeze_days": "longest run of bars a position was stuck",
+    "mean_free_scale": "mean scale applied to the free positions by cap_gross; 1 means nothing was scaled down",
+    "cap_infeasible_days": "leg-days on which the stuck positions alone exceeded the target exposure",
+    "short_leg_empty_days": "days with eligible securities but none that could be sold short",
     "participation_max": "largest single trade as a share of the security's average daily traded value, with the AUM given to the impact model",
     "participation_p99": "99th percentile of a trade's size as a share of the security's average daily traded value, with the AUM given to the impact model",
     "trades_over_10pct_adv": "share of trades above 10 percent of the average daily traded value",
@@ -63,9 +73,12 @@ EVENT_UNITS = {
 
 
 def jsonable(x):
-    """Convert numpy, pandas and Python objects to JSON types. NaN and infinity become None; mapping keys become text; timestamps become ISO text."""
+    """Convert numpy, pandas and Python objects to JSON types. NaN, infinity, NaT and NA become None; mapping keys become text (two keys that give the same text raise);
+    timestamps become ISO text; sets are written in sorted order so the text is the same on every run."""
     if x is None or isinstance(x, (str, bool)):
         return x
+    if x is pd.NaT or x is pd.NA:
+        return None
     if isinstance(x, (np.bool_,)):
         return bool(x)
     if isinstance(x, (int, np.integer)):
@@ -73,19 +86,54 @@ def jsonable(x):
     if isinstance(x, (float, np.floating)):
         v = float(x)
         return v if math.isfinite(v) else None
-    if isinstance(x, (pd.Timestamp, np.datetime64)):
-        return pd.Timestamp(x).isoformat()
+    if isinstance(x, np.datetime64):
+        return None if np.isnat(x) else pd.Timestamp(x).isoformat()
+    if isinstance(x, pd.Timestamp):
+        return x.isoformat()
+    if isinstance(x, (pd.Timedelta, pd.Period)):
+        return str(x)
     if isinstance(x, pd.DataFrame):
         return {"columns": [str(c) for c in x.columns], "index": [jsonable(i) for i in x.index], "data": [[jsonable(v) for v in row] for row in x.to_numpy(dtype=object)]}
     if isinstance(x, pd.Series):
         return {"index": [jsonable(i) for i in x.index], "data": [jsonable(v) for v in x.to_numpy(dtype=object)]}
     if isinstance(x, np.ndarray):
+        if x.ndim == 0:
+            return jsonable(x.item() if x.dtype.kind not in "mM" else x[()])
+        if x.dtype.kind in "mM":
+            return [jsonable(v) for v in x]                                # datetimes as ISO text, not as integers
         return [jsonable(v) for v in x.tolist()]
     if isinstance(x, dict):
-        return {str(k): jsonable(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple, set, frozenset)):
+        out: dict = {}
+        for k, v in x.items():
+            key = str(k)
+            if key in out:
+                raise ValueError(f"two keys of a dictionary are the same text in JSON ({key!r}); rename one")
+            out[key] = jsonable(v)
+        return out
+    if isinstance(x, (set, frozenset)):
+        return sorted((jsonable(v) for v in x), key=lambda t: json.dumps(t, sort_keys=True))
+    if isinstance(x, (list, tuple)):
         return [jsonable(v) for v in x]
     return str(x)
+
+
+def naive_index(index: pd.Index) -> pd.Index:
+    """The index as local wall-clock time without a time zone: a result is shown as its dates read where the data came from, not shifted to UTC."""
+    return index.tz_localize(None) if getattr(index, "tz", None) is not None else index
+
+
+def iso_labels(index: pd.Index) -> list[str]:
+    """Dates as `YYYY-MM-DD`, or with the time of day when any bar is not at midnight (intraday data)."""
+    idx = naive_index(index)
+    intraday = bool(((idx - idx.normalize()) != pd.Timedelta(0)).any())
+    return list(idx.strftime("%Y-%m-%dT%H:%M:%S" if intraday else "%Y-%m-%d"))
+
+
+def monthly_returns(s: pd.Series) -> pd.Series:
+    """Compounded return per calendar month. A month in which every bar is missing is NaN (not 0); a month with some missing bars counts them as 0 (cash)."""
+    s = s.copy()
+    s.index = naive_index(s.index)
+    return s.groupby(s.index.to_period("M")).apply(lambda x: np.nan if x.isna().all() else float((1.0 + x.fillna(0.0)).prod() - 1.0))
 
 
 def _header(kind: str, notes) -> dict:
@@ -115,16 +163,16 @@ def portfolio_to_dict(res, series: str = "monthly") -> dict:
     s = res.net_returns
     if series != "none" and s is not None:
         if series == "full":
-            out["series"] = {"dates": [d.date().isoformat() for d in s.index], "net_returns": jsonable(s.to_numpy())}
+            out["series"] = {"dates": iso_labels(s.index), "net_returns": jsonable(s.to_numpy())}
             if res.benchmark_returns is not None:
                 out["series"]["benchmark_returns"] = jsonable(res.benchmark_returns.reindex(s.index).to_numpy())
         else:
-            g = (1.0 + s).groupby(s.index.to_period("M")).prod() - 1.0
-            eq = (1.0 + s).cumprod().groupby(s.index.to_period("M")).last()
+            g = monthly_returns(s)
+            sn = s.copy(); sn.index = naive_index(sn.index)
+            eq = (1.0 + sn).cumprod().groupby(sn.index.to_period("M")).last().where(g.notna())          # no equity figure for a month with no data
             out["series"] = {"months": [str(p) for p in g.index], "net_return": jsonable(g.to_numpy()), "equity_at_month_end": jsonable(eq.to_numpy())}
             if res.benchmark_returns is not None:
-                b = res.benchmark_returns.reindex(s.index)
-                out["series"]["benchmark_return"] = jsonable(((1.0 + b.fillna(0.0)).groupby(b.index.to_period("M")).prod() - 1.0).to_numpy())
+                out["series"]["benchmark_return"] = jsonable(monthly_returns(res.benchmark_returns.reindex(s.index)).to_numpy())
     return out
 
 

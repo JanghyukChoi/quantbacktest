@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import warnings
 
+from .notes import warn
+
 import numpy as np
 import pandas as pd
 
@@ -55,7 +57,7 @@ def fama_macbeth(factor: pd.DataFrame, fwd: dict[int, pd.DataFrame],
         med = float(np.median(ev.sum(axis=1)))
         min_stocks = int(max(need, min(50, med * 0.5)))
         if med < need:
-            warnings.warn(
+            warn(
                 f"The median universe has {med:.0f} names but there are {len(cvs)} controls, "
                 f"so the regression has too few degrees of freedom (at least {need} names needed). "
                 f"Use fewer controls or more names.", stacklevel=2)
@@ -124,7 +126,7 @@ def fama_macbeth(factor: pd.DataFrame, fwd: dict[int, pd.DataFrame],
     # Perfect-collinearity diagnosis: if the factor is effectively the same as the controls the residual is 0 and every date is thrown away.
     # A silent NaN would hide the cause, so say it out loud.
     if n_eligible_days and n_collinear / n_eligible_days > 0.5:
-        warnings.warn(
+        warn(
             f"The factor is almost perfectly collinear with the controls "
             f"(residual about 0 on {n_collinear}/{n_eligible_days} days). "
             f"No information is left after the controls, so t is NaN. "

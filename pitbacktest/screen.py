@@ -23,7 +23,7 @@ from .core.controls import build_controls, neutralize, xs_norm
 from .core.estimators import (decile_profile, fama_macbeth, newey_west_t,
                               shuffle_columns, shuffle_null)
 from .core.gates import GateConfig, fire_structure, run_gates
-from .core.notes import keep_warnings
+from .core.notes import keep_warnings, warn
 from .core.panel import Panel, check_alignment
 
 
@@ -90,7 +90,7 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
     if n_null < 1:
         raise ValueError(f"n_null must be at least 1, got {n_null!r}")
     if n_null < 10:
-        warnings.warn(f"n_null={n_null}: the G1 threshold is the 95th percentile of only {n_null} shuffled |t| values, which is biased low and moves between "
+        warn(f"n_null={n_null}: the G1 threshold is the 95th percentile of only {n_null} shuffled |t| values, which is biased low and moves between "
                       f"seeds (on a test panel it averaged 0.9 with n_null=2 and 1.8 with n_null=20; the 95th percentile of pure noise is about 1.96). "
                       f"Use at least 10.", stacklevel=2)
     if primary_h not in horizons:

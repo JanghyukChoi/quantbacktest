@@ -47,7 +47,7 @@ import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
 from .core.impact import ImpactModel, _impact_cost
-from .core.notes import keep_warnings
+from .core.notes import keep_warnings, warn
 from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config, stop_at_ruin,
@@ -159,11 +159,11 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     ppy = panel.periods_per_year
     net, ruin = stop_at_ruin(net, cut)
     if ruin is not None:
-        warnings.warn(f"the account lost 100% or more on {panel.dates[ruin].date()}: from that day the return is -100% and then 0 (a leveraged account would have been liquidated)", stacklevel=2)
+        warn(f"the account lost 100% or more on {panel.dates[ruin].date()}: from that day the return is -100% and then 0 (a leveraged account would have been liquidated)", stacklevel=2)
     m = metrics(net[:cut], panel.dates, ppy)
     m["ruined"] = ruin is not None
     if float(np.abs(H[:cut]).sum()) == 0.0:
-        warnings.warn("no position was held on any day: the weights are all zero or NaN, or `capital` is too small to buy one lot of anything; "
+        warn("no position was held on any day: the weights are all zero or NaN, or `capital` is too small to buy one lot of anything; "
                       "the zero return is not a result", stacklevel=2)
     m["ruin_date"] = None if ruin is None else str(panel.dates[ruin].date())
     tr = np.zeros_like(H)
@@ -197,7 +197,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     if benchmark:
         br = _benchmark_returns(panel, fwd, benchmark)
         bench = metrics(br[:cut], panel.dates, ppy)
-        bexc = metrics((net - br)[:cut], panel.dates, ppy)
+        bexc = metrics(stop_at_ruin(net - br, cut)[0][:cut], panel.dates, ppy)
         bret = pd.Series(br[:cut], index=panel.dates[:cut], name="benchmark")
     s = pd.Series(net[:cut], index=panel.dates[:cut])
     yr = s.groupby(s.index.year).apply(lambda g: float((1 + g).prod() - 1))

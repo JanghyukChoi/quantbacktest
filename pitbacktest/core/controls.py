@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import warnings
 
+from .notes import warn
+
 import numpy as np
 import pandas as pd
 
@@ -52,7 +54,7 @@ def build_controls(panel, *, include_chars: bool = True) -> dict[str, pd.DataFra
     if lookback < len(close) - 21:
         out["mom252_21"] = close.pct_change(lookback) - close.pct_change(21)
     else:
-        warnings.warn(f"The 12-1 momentum control needs {lookback} bars of history and the panel has {len(close)}: it is left out of the controls.",
+        warn(f"The 12-1 momentum control needs {lookback} bars of history and the panel has {len(close)}: it is left out of the controls.",
                       stacklevel=2)
     if panel.mkt_cap is not None:
         out["logsize"] = np.log(panel.mkt_cap.replace(0, np.nan))
@@ -62,7 +64,7 @@ def build_controls(panel, *, include_chars: bool = True) -> dict[str, pd.DataFra
 
     if include_chars:
         if not panel.chars:
-            warnings.warn(
+            warn(
                 "Firm characteristics (chars) are missing. With price controls alone the ROA and book-to-market exposures are not captured, so "
                 "'someone else's alpha' can be mistaken for the factor's own. "
                 "Fill chars through an adapter, or state include_chars=False explicitly.",

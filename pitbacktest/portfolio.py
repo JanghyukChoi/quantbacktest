@@ -21,7 +21,7 @@ import pandas as pd
 
 from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
 from .core.impact import ImpactModel, _impact_cost
-from .core.notes import keep_warnings
+from .core.notes import keep_warnings, warn
 from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
 
@@ -106,7 +106,9 @@ def _normalize(mask_or_w: np.ndarray) -> np.ndarray:
 def stop_at_ruin(net: np.ndarray, cut: int) -> tuple[np.ndarray, int | None]:
     """An account that loses 100 percent or more in a day is gone: from the first such day (within the first `cut` rows) the return is -100 percent and
     every later return is 0. Without this, compounding goes on with negative equity (a 30x long that falls 4 percent), and CAGR, drawdown and Sharpe describe an
-    account that could not exist (a real one is liquidated first). Returns the series and the row of the ruin, None when there is none. The input is not changed."""
+    account that could not exist (a real one is liquidated first). Returns the series and the row of the ruin, None when there is none. The input is not changed.
+    Only the return series is stopped: turnover, the annual cost figures, exposure and the holdings still describe the bars after the ruin (the engine does not model
+    liquidation), so read them as figures for the whole sample. The row is a signal date; the loss itself is booked `entry_lag + 1` rows later."""
     bad = np.flatnonzero(np.asarray(net[:cut]) <= -1.0)
     if bad.size == 0:
         return net, None
@@ -124,24 +126,28 @@ def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
     if len(s) < ann // 2:
         # Annualised figures from under half a year are not reported. Say so: a NaN with no explanation looks like a bug, and
         # intraday studies are often a few months long.
-        warnings.warn(f"only {len(s):,} observations = {len(s) / ann:.2f} years (< 0.5): CAGR, MDD and Sharpe are NaN", stacklevel=2)
+        warn(f"only {len(s):,} observations = {len(s) / ann:.2f} years (< 0.5): CAGR, MDD and Sharpe are NaN", stacklevel=2)
         return {"CAGR": np.nan, "MDD": np.nan, "Sharpe": np.nan}
     eq = (1 + s).cumprod()
     yrs = len(s) / ann
     cagr = eq.iloc[-1] ** (1 / yrs) - 1
-    dd = eq / eq.cummax() - 1
+    dd = eq / np.maximum(eq.cummax(), 1.0) - 1                    # the starting capital (1.0) is a peak too: a loss on the first bars is a drawdown
     mdd = dd.min()
     trough = dd.idxmin()
-    peak = eq.loc[:trough].idxmax()
+    upto = eq.loc[:trough]
+    peak_level = max(float(upto.max()), 1.0)
     rec = eq.loc[trough:]
-    recov = rec[rec >= eq.loc[peak]].index
+    recov = rec[rec >= peak_level].index
+    sd = float(s.std())
+    down = float(np.sqrt(np.mean(np.minimum(s.to_numpy(), 0.0) ** 2)))                   # downside deviation, target 0
+    mean = float(s.mean())
     return {"CAGR": float(cagr), "MDD": float(mdd),
-            "Sharpe": float(s.mean() / (s.std() + 1e-12) * np.sqrt(ann)),
-            "Sortino": float(s.mean() / (np.sqrt(np.mean(np.minimum(s.to_numpy(), 0.0) ** 2)) + 1e-12) * np.sqrt(ann)),  # downside deviation, target 0
+            "Sharpe": float(mean / sd * np.sqrt(ann)) if sd > 1e-12 else np.nan,         # no variation: the ratio is undefined, not huge and not 0
+            "Sortino": float(mean / down * np.sqrt(ann)) if down > 1e-12 else np.nan,
             "Calmar": float(cagr / abs(mdd)) if mdd < 0 else np.nan,
-            "vol": float(s.std() * np.sqrt(ann)),
+            "vol": float(sd * np.sqrt(ann)),
             "years": float(yrs), "pos_days": float((s > 0).mean()),
-            "mdd_peak": str(peak.date()), "mdd_trough": str(trough.date()),
+            "mdd_peak": str(upto.idxmax().date()) if float(upto.max()) >= 1.0 else "start", "mdd_trough": str(trough.date()),
             "mdd_recovered": str(recov[0].date()) if len(recov) else "not recovered"}
 
 
@@ -156,7 +162,7 @@ def _forward_arrays(panel: Panel, funding: bool, delist_return: float | None):
     big = (ret > 10.0) & panel.eligible.to_numpy()
     if big.any():
         i, j = np.unravel_index(np.argmax(np.where(big, ret, -np.inf)), ret.shape)
-        warnings.warn(f"{int(big.sum())} daily moves above +1000% on eligible securities (largest: {panel.tickers[j]} on {panel.dates[i].date()}, {ret[i, j]:+.0%}); "
+        warn(f"{int(big.sum())} daily moves above +1000% on eligible securities (largest: {panel.tickers[j]} on {panel.dates[i].date()}, {ret[i, j]:+.0%}); "
                       "they are taken at face value. Look for an unadjusted split or consolidation or a bad price before believing the result", stacklevel=3)
     ret = np.nan_to_num(ret, nan=0.0)
     nxt = np.zeros(ret.shape, dtype=bool)
@@ -248,7 +254,8 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     """Factor -> portfolio result.
 
     factor      numeric score (higher = long). A boolean frame is refused: use backtest_event for yes/no signals.
-    long_q      long quantile (top q), in (0, 1]. short_q is the short quantile; None means long-only (0 is refused).
+    long_q      long quantile (top q), in (0, 1]. short_q is the short quantile; None means long-only (0 is refused). long_q + short_q above 1 is refused; at exactly 1
+                a security whose rank falls on the boundary can sit in both legs (the comparisons include the boundary), so leave a little room.
     weighting   equal | signal (proportional to signal strength) | rank
     spread_bp   **Two units.** A scalar is a round-trip spread: each unit of weight traded pays spread_bp/2
                 (to use a one-way cost of c bp, pass 2*c). A (date x ticker) panel is a one-way cost in bp, multiplied
@@ -346,7 +353,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     cut = len(panel.dates) - (panel.entry_lag + 1)
     net, ruin = stop_at_ruin(net, cut)
     if ruin is not None:
-        warnings.warn(f"the account lost 100% or more on {panel.dates[ruin].date()}: from that day the return is -100% and then 0 (a leveraged account would have been liquidated); read CAGR and drawdown, not Sharpe, which no longer describes an account", stacklevel=2)
+        warn(f"the account lost 100% or more on {panel.dates[ruin].date()}: from that day the return is -100% and then 0 (a leveraged account would have been liquidated); read CAGR and drawdown, not Sharpe, which no longer describes an account", stacklevel=2)
     m = metrics(net[:cut], panel.dates, panel.periods_per_year)
     m["ruined"] = ruin is not None
     m["ruin_date"] = None if ruin is None else str(panel.dates[ruin].date())
@@ -377,8 +384,9 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     m["delist_events_held"] = int((held & hit_next)[:cut].sum())
     npos = (hl > 0).sum(axis=1)
     m["avg_positions"] = float(npos[npos > 0].mean()) if (npos > 0).any() else float("nan")
-    if not (npos > 0).any():
-        warnings.warn("no position was held on any day: the factor gave no usable score on eligible securities (all NaN, no ranking, or the legs came out empty), "
+    held_any = ((hl > 0).sum(axis=1) + ((hs > 0).sum(axis=1) if hs is not None else 0)) > 0
+    if not held_any.any():
+        warn("no position was held on any day: the factor gave no usable score on eligible securities (all NaN, no ranking, or the legs came out empty), "
                       "so the zero return below is not a result", stacklevel=2)
 
     bench = bexc = None
@@ -386,7 +394,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     if benchmark:
         br = _benchmark_returns(panel, fwd, benchmark)
         bench = metrics(br[:cut], panel.dates, panel.periods_per_year)
-        bexc = metrics((net - br)[:cut], panel.dates, panel.periods_per_year)
+        bexc = metrics(stop_at_ruin(net - br, cut)[0][:cut], panel.dates, panel.periods_per_year)         # the same floor: excess cannot lose more than 100%
         bret = pd.Series(br[:cut], index=panel.dates[:cut], name="benchmark")
 
     s = pd.Series(net[:cut], index=panel.dates[:cut])
@@ -404,7 +412,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                 if short_q:
                     gr = gr - (hs2 * fwd).sum(axis=1)
                     co = co + apply_turnover_cost(hs2, c) + apply_side_cost(-hs2, bb, sb) - (hs2 * fwdf).sum(axis=1)
-                mm = metrics((gr - co)[:cut], panel.dates, panel.periods_per_year)
+                mm = metrics(stop_at_ruin(gr - co, cut)[0][:cut], panel.dates, panel.periods_per_year)
                 g[f"h{h}_c{c}"] = {"CAGR": mm["CAGR"], "Sharpe": mm["Sharpe"], "MDD": mm["MDD"]}
 
     if ledger is not None:

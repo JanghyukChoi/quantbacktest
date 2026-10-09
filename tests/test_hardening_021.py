@@ -50,7 +50,7 @@ def test_bad_prices():
             pp = replace(p, close=c)
             out, _ = _quiet(lambda: q.backtest_portfolio(pp, f, hold=1, spread_bp=10))
         else:
-            out = _warns(lambda: q.backtest_portfolio(replace(p, close=c), f, hold=1, spread_bp=10), "zero, negative or infinite")
+            out = _warns(lambda: q.backtest_portfolio(replace(p, close=c), f, hold=1, spread_bp=10), "negative or infinite")
         results[label] = out.net_returns.to_numpy()
         assert np.isfinite(results[label]).all() and np.abs(results[label]).max() < 1.0, (label, np.abs(results[label]).max())
     for label in ("zero", "negative", "inf"):

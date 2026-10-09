@@ -20,6 +20,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .core.notes import warn
+from .export import monthly_returns, naive_index
+
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 _CSS = """
@@ -123,7 +126,10 @@ def _log_ticks(lo: float, hi: float) -> list[float]:
     """Ticks 1, 2, 5 times a power of ten between lo and hi (positive numbers)."""
     cand = [m * 10.0 ** e for e in range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1) for m in (1, 2, 5)]
     out = [t for t in cand if lo * 0.999 <= t <= hi * 1.001]
-    return out if len(out) >= 3 else sorted(set(out + [m * 10.0 ** e for e in range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1) for m in (1, 1.5, 3)]))
+    if len(out) > 12:                                                    # a fall of many orders of magnitude: powers of ten only, thinned
+        pw = [t for t in out if abs(math.log10(t) - round(math.log10(t))) < 1e-9]
+        out = pw[:: math.ceil(len(pw) / 8)] if len(pw) > 8 else pw
+    return out if len(out) >= 3 or len(cand) > 12 else sorted(set(out + [m * 10.0 ** e for e in range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1) for m in (1, 1.5, 3)]))
 
 
 def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, height: int = 230, area: bool = False, zero_line: bool = False,
@@ -189,7 +195,7 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
             paths.append(f'<path class="ln" d="{d}" style="stroke:{s["color"]}"/>')
     data = {"w": W, "h": H, "l": L, "r": R, "t": T, "b": B, "x0": x0, "x1": x1, "ymin": lo, "ymax": hi, "log": bool(logy), "xs": [round(float(v), 3) for v in xs],
             "labels": [xfmt(v) for v in xs],
-            "series": [{"name": s["name"], "color": s["color"], "fmt": s["fmt"], "y": [None if not np.isfinite(v) else round(float(v), 6) for v in y]}
+            "series": [{"name": s["name"], "color": s["color"], "fmt": s["fmt"], "y": [None if not np.isfinite(v) else float(f"{v:.8g}") for v in y]}
                        for s, y in zip(series, ys)]}
     blob = json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("<", "\\u003c")
     legend = ""
@@ -205,6 +211,10 @@ def _date_fmt(v: float) -> str:
     return pd.Timestamp(int(v), unit="ms").strftime("%Y-%m-%d")
 
 
+def _datetime_fmt(v: float) -> str:
+    return pd.Timestamp(int(v), unit="ms").strftime("%Y-%m-%d %H:%M")
+
+
 def _year_fmt(v: float) -> str:
     return pd.Timestamp(int(v), unit="ms").strftime("%Y")
 
@@ -213,10 +223,6 @@ def _year_ticks(first: pd.Timestamp, last: pd.Timestamp) -> list[float]:
     years = pd.date_range(first.normalize() + pd.offsets.YearBegin(0), last, freq="YS")
     step = max(1, math.ceil(len(years) / 7))
     return [float(t.value // 10 ** 6) for t in years[::step]]
-
-
-def _monthly(s: pd.Series) -> pd.Series:
-    return (1.0 + s).groupby(s.index.to_period("M")).prod() - 1.0
 
 
 def _tile(label: str, value: str, detail: str = "") -> str:
@@ -237,7 +243,7 @@ def _heat(monthly: pd.Series) -> str:
                 v = float(monthly[p]); ys.append(v)
                 arm, a = ("pos", v / m) if v >= 0 else ("neg", -v / m)
                 bg = f"color-mix(in srgb, var(--{arm}) {min(55.0, 8.0 + 47.0 * a):.0f}%, var(--mid))"
-                cells.append(f'<td style="background:{bg}" title="{_esc(p)}: {v * 100:.2f}%">{v * 100:.1f}</td>')
+                cells.append(f'<td style="background:{bg}" title="{_esc(p)}: {_unsigned_zero(f"{v * 100:.2f}")}%">{_unsigned_zero(f"{v * 100:.1f}")}</td>')
             else:
                 cells.append('<td class="na"></td>')
         tot = float(np.prod([1.0 + v for v in ys]) - 1.0) if ys else float("nan")
@@ -247,10 +253,14 @@ def _heat(monthly: pd.Series) -> str:
 
 def _year_table(s: pd.Series, ppy: int) -> str:
     rows = []
-    for y, g in s.groupby(s.index.year):
-        eq = (1.0 + g).cumprod()
-        sh = g.mean() / g.std() * math.sqrt(ppy) if len(g) > 2 and g.std() > 0 else float("nan")
-        rows.append(f"<tr><td>{y}</td><td>{_pct(eq.iloc[-1] - 1)}</td><td>{_pct(g.std() * math.sqrt(ppy))}</td><td>{_num(sh)}</td><td>{_pct((eq / eq.cummax() - 1).min())}</td><td>{len(g)}</td></tr>")
+    idx = naive_index(s.index)
+    start = 1.0                                                          # the equity at the end of the year before: a loss on a year's first bar is part of its drawdown
+    for y, g in s.groupby(idx.year):
+        eq = (1.0 + g).cumprod() * start
+        sh = g.mean() / g.std() * math.sqrt(ppy) if len(g) > 2 and g.std() > 1e-12 else float("nan")
+        worst = (eq / np.maximum(eq.cummax(), start) - 1).min()
+        rows.append(f"<tr><td>{y}</td><td>{_pct(eq.iloc[-1] / start - 1)}</td><td>{_pct(g.std() * math.sqrt(ppy))}</td><td>{_num(sh)}</td><td>{_pct(worst)}</td><td>{len(g)}</td></tr>")
+        start = float(eq.iloc[-1])
     return ('<div class="wrap"><table><tr><th>Year</th><th>Return</th><th>Volatility</th><th>Sharpe</th><th>Worst drawdown</th><th>Bars</th></tr>'
             + "".join(rows) + "</table></div>")
 
@@ -260,21 +270,29 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     s = res.net_returns
     if s is None or len(s) == 0:
         raise ValueError("the result has no net_returns to report")
-    s = s.astype(float)
+    s = s.astype(float).copy()
+    s.index = naive_index(s.index)                                        # shown as the dates read where the data came from, not shifted to UTC
     ppy = int(res.spec.get("periods_per_year", 252))
     m = res.metrics
     eq = (1.0 + s).cumprod()
-    dd = eq / eq.cummax() - 1.0
+    dd = eq / np.maximum(eq.cummax(), 1.0) - 1.0                           # the starting capital is a peak: a loss on the first bars shows
     xms = np.array([t.value // 10 ** 6 for t in s.index], dtype=np.float64)
+    gap = s.index.to_series().diff().dropna().median() if len(s) > 2 else pd.Timedelta(days=1)
+    intraday = bool(pd.notna(gap) and gap < pd.Timedelta(hours=12))
     ticks = _year_ticks(s.index[0], s.index[-1]) if (s.index[-1] - s.index[0]).days > 700 else None
-    win = max(20, ppy // 2)
-    roll = s.rolling(win).mean() / s.rolling(win).std() * math.sqrt(ppy)
+    tickfmt = _year_fmt if ticks is not None else None
+    xfmt = _datetime_fmt if intraday else _date_fmt
+    win = max(20, min(ppy // 2, len(s) // 4))                              # half a year, but never more than a quarter of the sample (5-minute bars: half a year is 52,560)
+    roll = s.rolling(win).mean() / s.rolling(win).std().where(lambda v: v > 1e-12) * math.sqrt(ppy)
 
     ci = None
+    ci_why = "fewer than 30 bars" if len(s) < 30 else ""
     try:
         ci = res.sharpe_ci(seed=0) if len(s) >= 30 else None
-    except Exception:                                                  # the interval is an extra: a report must not fail because it cannot be computed
-        ci = None
+    except Exception as ex:                                            # the interval is an extra: a report must not fail because it cannot be computed
+        ci, ci_why = None, str(ex)[:80]
+    if ci is not None and not all(_ok(ci.get(k)) for k in ("sharpe", "lo", "hi")):
+        ci, ci_why = None, "the returns have no variation to resample" if not _ok(m.get("Sharpe")) else "the bootstrap gave no finite interval"
     ab = None
     if res.benchmark_returns is not None:
         try:
@@ -291,6 +309,9 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     if ledger is not None and family is not None:
         try:
             d = ledger.deflated_sharpe(family, periods_per_year=ppy)
+            if not d.get("verify", {}).get("ok", True):
+                items.append(("bad", "Ledger damaged", f"the hash chain of the trial ledger does not check out (first bad line {d['verify'].get('first_bad_line')}): a trial was removed or "
+                              "edited, so the trial count below is not reliable."))
             ok = _ok(d.get("dsr")) and d["dsr"] >= 0.95
             items.append(("ok" if ok else "w", "Deflated Sharpe",
                           f"{d['trials']} trials recorded in family '{family}'. The best trial in the family ('{d.get('best_name', '?')}', not necessarily this run) has Sharpe {_num(d['sharpe'])}; the best of {d['trials']} random strategies would show about {_num(d['sharpe_luck_benchmark'])} "
@@ -300,6 +321,8 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     else:
         items.append(("w", "Trials not counted", "No ledger was given, so this page cannot say how many variants were tried before this one. A Sharpe ratio picked as the best of many tries is "
                       "overstated; pass ledger= and family= to include the deflated Sharpe."))
+    if ci is None:
+        items.append(("w", "Sharpe interval", f"could not be computed ({ci_why}); this page cannot say how uncertain the Sharpe ratio is."))
     if ci is not None:
         items.append(("w" if ci["lo"] <= 0 else "ok", "Sharpe interval", f"{_num(ci['sharpe'])}, 95% interval {_num(ci['lo'])} to {_num(ci['hi'])} "
                       f"(stationary block bootstrap, {len(s):,} bars); {'it includes 0: no evidence of an edge from this sample alone.' if ci['lo'] <= 0 else 'it excludes 0.'}"))
@@ -309,7 +332,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
                    else "positive and above the 2.5 bar" if t_a >= 2.5 else "no evidence of alpha (|t| below 2.5)")
         items.append(("ok" if t_a >= 2.5 else "w", "Alpha against the benchmark", f"{_pct(ab.get('alpha_annual'))} a year, t = {_num(t_a)}, beta {_num(next(iter(ab['betas'].values()), {}).get('beta'))}: {verdict}. "
                       "Newey-West t-values over-reject in finite samples (about 9% instead of 5%), so 2.5 rather than 2 is the bar."))
-    cls = "bad" if m.get("ruined") else ("ok" if all(k == "ok" for k, _, _ in items) else "")
+    cls = "bad" if (m.get("ruined") or any(k == "bad" for k, _, _ in items)) else ("ok" if all(k == "ok" for k, _, _ in items) else "")
     icon = {"w": "!", "ok": "✓", "bad": "✕"}
     lis = "".join(f'<li class="{k}"><span class="ic">{icon[k]}</span><span class="lab">{_esc(t)}.</span> {_esc(x)}</li>' for k, t, x in items)
     read = f'<section class="card read {cls}"><div class="lab">Read this first: what limits these numbers</div><ul>{lis}</ul></section>'
@@ -327,16 +350,17 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
         b = res.benchmark_returns.reindex(s.index).fillna(0.0)
         sers.append({"name": "Benchmark (no costs)", "y": (1.0 + b).cumprod().to_numpy(), "color": "var(--muted)", "fmt": "eq"})
     allpos = np.concatenate([x_[np.isfinite(x_)] for x_ in (np.asarray(sr["y"], dtype=float) for sr in sers)])
-    wide = bool(len(allpos) and allpos.min() > 0 and allpos.max() / allpos.min() > 8.0)       # a fall from 1 to 0.1 is unreadable on a straight axis
+    wide = bool(len(allpos) and allpos.min() > 1e-100 and allpos.max() < 1e100 and allpos.max() / allpos.min() > 8.0)       # a fall from 1 to 0.1 is unreadable on a straight axis
     charts = [
-        _chart("equity", "Growth of 1 (net of costs and funding)" + (", log scale" if wide else ""), xms, sers, yfmt="num", xfmt=_date_fmt, height=260, max_points=max_points, xticks=ticks,
-               xtickfmt=_year_fmt, logy=wide),
+        _chart("equity", "Growth of 1 (net of costs and funding)" + (", log scale" if wide else ""), xms, sers, yfmt="num", xfmt=xfmt, height=260, max_points=max_points, xticks=ticks,
+               xtickfmt=tickfmt, logy=wide),
         _chart("drawdown", "Drawdown from the previous peak", xms, [{"name": "Drawdown", "y": dd.to_numpy(), "color": "var(--s2)", "fmt": "pct"}], yfmt="pct",
-               xfmt=_date_fmt, area=True, zero_line=True, max_points=max_points, xticks=ticks, xtickfmt=_year_fmt, width=470, height=220),
+               xfmt=xfmt, area=True, zero_line=True, max_points=max_points, xticks=ticks, xtickfmt=tickfmt, width=470, height=220),
         _chart("rolling", f"Rolling Sharpe ({win} bars, annualised)", xms, [{"name": "Rolling Sharpe", "y": roll.to_numpy(), "color": "var(--s1)", "fmt": "num"}], yfmt="num",
-               xfmt=_date_fmt, zero_line=True, max_points=max_points, xticks=ticks, xtickfmt=_year_fmt, width=470, height=220),
+               xfmt=xfmt, zero_line=True, max_points=max_points, xticks=ticks, xtickfmt=tickfmt, width=470, height=220)
+        if np.isfinite(roll.to_numpy()).any() else '<figure class="chart"><figcaption>Rolling Sharpe</figcaption><p class="sub">Not drawn: the sample is too short for a rolling window.</p></figure>',
     ]
-    mon = _monthly(s)
+    mon = monthly_returns(s)
 
     cost_rows = []
     for k, label in (("cost_annual_bp", "Trading costs"), ("spread_annual_bp", "Spread"), ("side_cost_annual_bp", "Buy/sell side costs"), ("borrow_annual_bp", "Short borrow"),
@@ -347,15 +371,23 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
         cost_rows.append(f"<tr><td>CAGR given up to costs and funding</td><td>{_pct(m['gross_CAGR'] - m['CAGR'])} a year</td></tr>")
     H = res.holdings
     if H is not None and getattr(H, "size", 0):
-        H = np.asarray(H, dtype=float)
+        H = np.asarray(H, dtype=float)[: len(s)]                          # the same bars as the returns (the last bars have no holding period)
         cost_rows.append(f"<tr><td>Average long exposure</td><td>{np.nanmean(np.where(H > 0, H, 0).sum(axis=1)):.2f}</td></tr>"
                          f"<tr><td>Average short exposure</td><td>{np.nanmean(np.where(H < 0, -H, 0).sum(axis=1)):.2f}</td></tr>")
     costs = f'<div class="card wrap"><table>{"".join(cost_rows)}</table></div>' if cost_rows else ""
 
     cap = ""
     if capacity is not None and len(capacity):
+        need = {"y", "aum", "sharpe", "cagr"}
+        if not need <= set(capacity.columns):
+            raise ValueError(f"capacity must be the table from capacity_curve; columns missing: {sorted(need - set(capacity.columns))}")
+        if capacity.duplicated(["y", "aum"]).any():
+            raise ValueError("capacity has two rows for the same y and aum")
         c = capacity.sort_values(["y", "aum"])
-        ys_ = list(dict.fromkeys(c["y"].tolist()))[:3]
+        ys_all = list(dict.fromkeys(c["y"].tolist()))
+        ys_ = ys_all[:3]
+        if len(ys_all) > 3:
+            warn(f"capacity has {len(ys_all)} impact coefficients; the page shows the first 3", stacklevel=2)
         aums = sorted(c["aum"].unique())
         cs = [("var(--s1)", "var(--s2)", "var(--s3)")[i] for i in range(len(ys_))]
         series = []
@@ -364,7 +396,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
             series.append({"name": f"Impact coefficient Y = {yv:g}", "y": sub["cagr"].to_numpy(dtype=float), "color": col, "fmt": "pct"})
         lx = np.log10(np.array(aums, dtype=float))
         cap = ("<h2>Capacity</h2><div class='card'>"
-               + _chart("capacity", "Net CAGR by the amount of money run (log scale)", lx, series, yfmt="pct", xfmt=lambda v: f"{10 ** v:,.3g}", zero_line=True, max_points=max_points,
+               + _chart("capacity", "Net CAGR by the amount of money run (log scale)", lx, series, yfmt="pct", xfmt=lambda v: f"{10 ** v:,.4g}" if 10 ** v < 1e4 else f"{10 ** v:,.0f}", zero_line=True, max_points=max_points,
                         xticks=[float(v) for v in lx])
                + "<div class='wrap'><table><tr><th>Money</th>" + "".join(f"<th>Sharpe, Y={yv:g}</th>" for yv in ys_) + "<th>Largest trade vs daily volume (99th pct)</th></tr>"
                + "".join(f"<tr><td>{a:,.4g}</td>" + "".join(f"<td>{_num(c[(c['y'] == yv) & (c['aum'] == a)]['sharpe'].iloc[0])}</td>" for yv in ys_)
@@ -380,7 +412,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{_esc(ttl)}</title><style>{_CSS}</style></head><body><main>"
             f"<h1>{_esc(ttl)}{badge}</h1>"
-            f"<p class=\"sub\">{s.index[0].date()} to {s.index[-1].date()} · {len(s):,} bars · pitbacktest {__version__}</p>"
+            f"<p class=\"sub\">{xfmt(xms[0])} to {xfmt(xms[-1])} · {len(s):,} bars · pitbacktest {__version__}</p>"
             f"{read}<h2>Figures</h2><div class=\"tiles\">{tiles}</div>"
             f"<h2>Curves</h2><div class=\"card\">{charts[0]}</div><div class=\"two\" style=\"margin-top:12px\"><div class=\"card\">{charts[1]}</div><div class=\"card\">{charts[2]}</div></div>"
             f"<h2>Months and years</h2><div class=\"card\">{_heat(mon)}</div><div class=\"card\" style=\"margin-top:12px\">{_year_table(s, ppy)}</div>"
