@@ -141,7 +141,7 @@
    "returns_beyond_100pct": 0,
    "delist_flags": 502
   },
-  "seconds": 525,
+  "seconds": 480,
   "passed": true
  },
  {
@@ -286,7 +286,7 @@
    "returns_beyond_100pct": 234,
    "delist_flags": 169
   },
-  "seconds": 84,
+  "seconds": 69,
   "passed": true
  },
  {
@@ -426,7 +426,7 @@
    "returns_beyond_100pct": 150,
    "delist_flags": 372
   },
-  "seconds": 81,
+  "seconds": 62,
   "passed": true
  }
 ]

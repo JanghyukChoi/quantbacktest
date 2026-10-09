@@ -5,3 +5,6 @@
 __pycache__/
 build/
 dist/
+
+# per-market intermediates of docs/market_validation.py (the report and results.json are the outputs)
+docs/.market_validation_*.json
