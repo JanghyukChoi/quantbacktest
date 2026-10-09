@@ -55,6 +55,7 @@ free of survivorship bias.
 | Rule | Why |
 |---|---|
 | One timing convention, checked by `assert_timing()` | An entry that is one day late (or early) silently changes results, most of all for 1-day mean reversion |
+| `panel.assert_causal(make_signal)` rebuilds a signal from the panel cut at random dates and requires the last row to match the full-data row | The exact test for look-ahead in how a signal is computed: a negative shift, a centred window, a mean or z-score over the whole history all fail it, a past-only signal always passes. The older heuristic `assert_no_lookahead` has blind spots (it passes a signal that is the future return itself); do not rely on it |
 | Firm-characteristic controls are the default (size, book-to-market, momentum, ROA, asset growth) | Without them a "new alpha" is often a known factor in disguise. It warns when characteristics are missing |
 | `screen` decides on a t-statistic computed **with controls** and re-tests after neutralising; uncontrolled figures (`excess_bp`, `coef_bp_raw`) sit beside them, labelled | A large raw number should not be the thing that passes a factor |
 | Win rate is reported with its base rate: `lift = win rate - base rate` | With a longer holding period both rise together; only the lift says anything about the signal |
@@ -276,7 +277,7 @@ symbol, with no error. See `docs/survivorship.md`.
 
 ## What is verified, and what is not
 
-`docs/verification_status.md` lists the evidence behind each part and, more important, what is not established (no human review yet, Korean dividends, the impact coefficient, the weaker
+[`docs/verification_status.md`](https://github.com/JanghyukChoi/quantbacktest/blob/main/docs/verification_status.md) lists the evidence behind each part and, more important, what is not established (no human review yet, Korean dividends, the impact coefficient, the weaker
 parts such as `screen` and `backtest_event`). Read it before relying on a result.
 
 ## Tests: known answers, not real data

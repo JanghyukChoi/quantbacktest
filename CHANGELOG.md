@@ -75,6 +75,9 @@
 - **More real-data validation** (`docs/market_validation.py`, V8): the deflated Sharpe does not call the best of 40 shuffled strategies real and does call a planted edge of Sharpe 3 real; the
   probability of backtest overfitting is lower with the edge; shuffled factors and random event signals do not survive the six gates; the exact causality check. Measured limit: an edge of Sharpe 1.5
   is not called real in the crypto sample (5.7 years).
+- **Gate false-discovery rate on real data.** `docs/gate_false_positives.py`: 60 shuffled factors through `screen` and 60 random yes/no signals through `backtest_event` in crypto and in the US
+  sample (and 40 and 40 in Korea): none survived the six gates (95 percent upper bound on the rate 4.9 and 7.2 percent). The first gate alone passed 14 of 160 (8.8 percent against a nominal 5), because the
+  null threshold was built from 10 shuffles, which biases it low; the later gates removed all of them.
 - **Tiingo full downloads.** `fetch_symbols(full=True)` keeps open, high, low (adjusted), the dividend and the split factor; `build_tiingo_panel` then fills `Panel.open/high/low`
   and `meta["div_cash"]`. Stores made without it read as before. The free plan allows 500 distinct symbols a month and 50 requests an hour; re-requesting a symbol already looked up
   did not hit the monthly limit.
