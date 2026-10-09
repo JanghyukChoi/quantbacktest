@@ -1,0 +1,40 @@
+gate_power.py, 2026-10-09. In the crypto and US logs rho 0.005 is printed as 0.01 and lift 0.05 as 0.1 (too few digits); order is 0, 0.005, 0.01, 0.02, 0.05 and 0, 0.05, 0.1, 0.2, 0.3.
+
+== crypto_new
+Binance USDT-M 2021-: 20 planted factors and 20 planted event signals per strength
+  screen  rho 0.00 (measured rank IC -0.000): 0/20 survive all six gates (0%-17%); first gate alone 2/20  [63 s]
+  screen  rho 0.01 (measured rank IC 0.002): 0/20 survive all six gates (0%-17%); first gate alone 6/20  [127 s]
+  screen  rho 0.01 (measured rank IC 0.011): 5/20 survive all six gates (9%-49%); first gate alone 18/20  [195 s]
+  screen  rho 0.02 (measured rank IC 0.021): 18/20 survive all six gates (68%-99%); first gate alone 20/20  [262 s]
+  screen  rho 0.05 (measured rank IC 0.049): 20/20 survive all six gates (83%-100%); first gate alone 20/20  [331 s]
+  event   lift 0.0 (mean trade -22 bp after costs): 0/20 pass all gates (0%-17%)  [384 s]
+  event   lift 0.1 (mean trade 26 bp after costs): 3/20 pass all gates (3%-38%)  [438 s]
+  event   lift 0.1 (mean trade 59 bp after costs): 14/20 pass all gates (46%-88%)  [491 s]
+  event   lift 0.2 (mean trade 123 bp after costs): 20/20 pass all gates (83%-100%)  [544 s]
+  event   lift 0.3 (mean trade 190 bp after costs): 20/20 pass all gates (83%-100%)  [596 s]
+
+== us
+US Tiingo sample 2013- (full fields, 465 of 466 tickers with data): 20 planted factors and 20 planted event signals per strength
+  screen  rho 0.00 (measured rank IC 0.001): 0/20 survive all six gates (0%-17%); first gate alone 2/20  [61 s]
+  screen  rho 0.01 (measured rank IC 0.007): 0/20 survive all six gates (0%-17%); first gate alone 10/20  [125 s]
+  screen  rho 0.01 (measured rank IC 0.009): 0/20 survive all six gates (0%-17%); first gate alone 20/20  [187 s]
+  screen  rho 0.02 (measured rank IC 0.022): 3/20 survive all six gates (3%-38%); first gate alone 20/20  [250 s]
+  screen  rho 0.05 (measured rank IC 0.048): 20/20 survive all six gates (83%-100%); first gate alone 20/20  [311 s]
+  event   lift 0.0 (mean trade 11 bp after costs): 0/20 pass all gates (0%-17%)  [366 s]
+  event   lift 0.1 (mean trade 27 bp after costs): 5/20 pass all gates (9%-49%)  [423 s]
+  event   lift 0.1 (mean trade 46 bp after costs): 15/20 pass all gates (51%-91%)  [480 s]
+  event   lift 0.2 (mean trade 85 bp after costs): 20/20 pass all gates (83%-100%)  [538 s]
+  event   lift 0.3 (mean trade 127 bp after costs): 20/20 pass all gates (83%-100%)  [597 s]
+
+== krx
+KRX 2016- (price limit 30% assumed): 20 planted factors and 20 planted event signals per strength
+  screen  rho 0.000 (measured rank IC -0.001): 0/20 survive all six gates (0%-17%); first gate alone 2/20  [397 s]
+  screen  rho 0.005 (measured rank IC 0.004): 0/20 survive all six gates (0%-17%); first gate alone 20/20  [772 s]
+  screen  rho 0.010 (measured rank IC 0.009): 0/20 survive all six gates (0%-17%); first gate alone 20/20  [1172 s]
+  screen  rho 0.020 (measured rank IC 0.019): 20/20 survive all six gates (83%-100%); first gate alone 20/20  [1554 s]
+  screen  rho 0.050 (measured rank IC 0.048): 20/20 survive all six gates (83%-100%); first gate alone 20/20  [1908 s]
+  event   lift 0.00 (mean trade -16 bp after costs): 0/20 pass all gates (0%-17%)  [2234 s]
+  event   lift 0.05 (mean trade 12 bp after costs): 17/20 pass all gates (62%-97%)  [2557 s]
+  event   lift 0.10 (mean trade 38 bp after costs): 20/20 pass all gates (83%-100%)  [2890 s]
+  event   lift 0.20 (mean trade 95 bp after costs): 20/20 pass all gates (83%-100%)  [3227 s]
+  event   lift 0.30 (mean trade 151 bp after costs): 20/20 pass all gates (83%-100%)  [3559 s]

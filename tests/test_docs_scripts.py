@@ -3,6 +3,7 @@
 D1 slippage   a book of known depth gives the hand-computed average slippage; an order larger than the book is NaN
 D2 implied Y  the implied coefficient equals slippage / (sigma * sqrt(share of turnover)), with the sides averaged
 D3 spread     the time-weighted half spread of a tiny hand-made quote file, with a gap capped, a crossed quote counted and chunking not changing it
+D4 power      the exact binomial interval of the gate power script equals closed forms, and the planted factor has the rank correlation it was built for
 """
 from __future__ import annotations
 import importlib.util, io, sys, tempfile, zipfile
@@ -64,7 +65,29 @@ def test_spread_measure():
     print("D3 the time-weighted half spread equals a hand computation (gap capped, crossed quote counted), whatever the chunking  PASS")
 
 
+def test_gate_power_helpers():
+    m = _load("gp", "docs/gate_power.py")
+    lo, up = m.interval(0, 20)
+    assert lo == 0.0 and abs(up - (1 - 0.025 ** (1 / 20))) < 1e-9, up                # zero of n: the upper limit solves (1-p)^n = alpha/2
+    lo, up = m.interval(20, 20)
+    assert up == 1.0 and abs(lo - 0.025 ** (1 / 20)) < 1e-9, lo                       # all of n: the lower limit solves p^n = alpha/2
+    lo, up = m.interval(10, 20)
+    assert abs(lo + up - 1.0) < 1e-9 and 0.27 < lo < 0.28                             # symmetric around one half
+    rng = np.random.default_rng(0)
+    idx = pd.RangeIndex(60); cols = [f"s{i}" for i in range(400)]
+    fwd = pd.DataFrame(rng.standard_normal((60, 400)), index=idx, columns=cols)
+    elig = pd.DataFrame(True, index=idx, columns=cols)
+    z = m.rank_score(fwd, elig)
+    assert np.allclose(z.mean(axis=1), np.sqrt(12.0) / (2 * 400), atol=1e-9) and np.allclose(z.std(axis=1, ddof=0), 1.0, atol=0.01)   # mean of pct ranks is (n+1)/2n: a constant per day, which changes no ranking
+    for rho in (0.0, 0.1, 0.5):
+        noise = pd.DataFrame(rng.standard_normal((60, 400)), index=idx, columns=cols)
+        f = rho * z + np.sqrt(1 - rho ** 2) * noise
+        assert abs(m.mean_rank_ic(f, fwd, step=1) - rho) < 0.03, (rho, m.mean_rank_ic(f, fwd, step=1))
+    print("D4 the exact interval equals closed forms; the planted factor has the rank correlation it was built for  PASS")
+
+
 if __name__ == "__main__":
     test_slippage_and_implied_y()
     test_spread_measure()
+    test_gate_power_helpers()
     print("docs script tests: all passed")
