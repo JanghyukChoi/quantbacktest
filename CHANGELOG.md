@@ -13,6 +13,29 @@
   in each leg and in the currency of `close x volume`. The 25-cell `grid` is left out when an impact model is given. `ImpactModel` now lives in `pitbacktest.core.impact`
   (still importable from `pitbacktest.weights` and from `pitbacktest`).
 
+### Found by two independent reviews of 0.3.0 and fixed before release
+- **Warnings are kept per call, not by swapping the global filters.** The first version of `result.notes` replaced the process-wide warning filters while an engine ran: two engine
+  calls in two threads could swap each other's warnings, and leave the filters changed so that later warnings disappeared; `-W error` let the engine finish (and write a ledger
+  trial) before raising. Library warnings now go through `core.notes.warn`, which records the text on a `ContextVar` list that belongs to the running call and otherwise behaves
+  as `warnings.warn`: a warning that raises stops the run where it happened, nothing global is touched.
+- **A zero price on the last bar of a series is a bankruptcy mark and books -100 percent.** The first 0.3.0 draft turned every zero into a missing price, which erased the loss of a
+  name that went to 0.00. Only a zero before the series trades again (a halt written as 0), negative and infinite prices are missing.
+- **The starting capital counts as a peak: a loss on the first bar is a drawdown** (maximum drawdown was 0 when the first bar lost 30 percent and the curve never got back to 1); a
+  year's drawdown in the report starts from the previous year's end. `mdd_peak` is `"start"` when the peak is the starting capital.
+- **No variation, no Sharpe ratio.** A constant return series gave a Sharpe of 1.6e10 and an all-zero one gave 0; both are now NaN (JSON `null`).
+- After a ruin the 25-cell grid and the excess-against-benchmark figures are stopped at -100 percent as well (they showed -214 percent and NaN).
+- `check_alignment` measures overlap with `Index.get_indexer`, the machinery of `reindex`, so a table that aligns is accepted and one that does not is refused (a factor indexed by
+  `datetime.date` was refused although it aligns; string dates passed although they do not). A sparse event table no longer warns about its dates.
+- `periods_per_year` is only checked for daily or slower dates (session-based intraday bars have no fixed number per year); the panel's own warnings (prices set to missing,
+  `periods_per_year`) reach `result.notes`.
+- `deflated_sharpe` ignores a constant column and raises when fewer than two columns have a usable Sharpe ratio (it returned NaN silently).
+- Report and export: a Sharpe interval that cannot be computed is said so (it printed "it excludes 0" with a check mark); a damaged ledger is flagged; time-zone-aware indexes read
+  as written (they were shifted to UTC and leaked a pandas warning); intraday results get time-of-day labels and a rolling window that fits the sample; a month with no data is
+  `null` (it was 0); NaT, NA, 0-d and datetime arrays, colliding keys and sets (sorted, so the text is the same on every run) are written right; heat-map cells never print `-0.0`;
+  equity values keep eight significant digits and the log axis refuses extremes; `capacity` is checked.
+- Known and documented: after a ruin the cost and turnover averages still run over the bars after it (the engine does not model liquidation); with `long_q + short_q` exactly 1 a
+  security on the boundary can sit in both legs.
+
 ## 0.2.1
 Found by running the engines on hostile inputs (zero and infinite prices, misaligned tables, leverage that wipes the account).
 - **Fixed: a zero or infinite price on a held security gave a daily return of 3.6e307** (the infinite return was turned into the largest float) and a Sharpe of 0.
