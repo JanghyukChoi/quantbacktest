@@ -25,6 +25,9 @@
 - The permutation of a factor is **before costs**: shuffling each date independently destroys the persistence of the ranking, so shuffled portfolios turn over far more, and with costs in
   the null a slow factor with no information at all beat it (p = 0.02). Found on real crypto data, where a losing reversal strategy came out "significant".
 
+- Metamorphic tests (`tests/test_metamorphic.py`): invariances under reordering or renaming securities, monotone transforms of the factor, inert additions, price level, scaling, cost, and (the strongest) scrambling
+  everything after a date leaves everything before it unchanged.
+
 ### Found by two independent reviews of 0.3.0 and fixed before release
 - **Warnings are kept per call, not by swapping the global filters.** The first version of `result.notes` replaced the process-wide warning filters while an engine ran: two engine
   calls in two threads could swap each other's warnings, and leave the filters changed so that later warnings disappeared; `-W error` let the engine finish (and write a ledger
