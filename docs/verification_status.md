@@ -73,3 +73,5 @@ and was treated as one security; false returns of thousands of percent when a co
 
 The fastest way to find what the author missed: run `python docs/market_validation.py all`, read `docs/market_validation.md`, then try to break one of
 `tests/test_execution.py`, `tests/test_side_costs_shorting.py` or `tests/test_reconcile.py` by changing the code under test; each should fail.
+
+A longer brief, with time boxes and the format for reporting findings, is in `docs/reviewing.md`.

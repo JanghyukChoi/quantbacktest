@@ -25,9 +25,9 @@ dependencies = ["pandas>=2.0", "numpy>=1.24"]
 
 [project.optional-dependencies]
 yfinance = ["yfinance"]
-# The cross-check tests compare against statsmodels and scipy when they are installed; they are not needed to use the library.
-test = ["pytest>=7.0", "statsmodels", "scipy"]
-dev = ["pytest>=7.0", "statsmodels", "scipy", "ruff", "build", "twine"]
+# The cross-check tests compare against statsmodels, scipy and empyrical, and the property tests use hypothesis, when they are installed; they are not needed to use the library.
+test = ["pytest>=7.0", "statsmodels", "scipy", "hypothesis", "empyrical-reloaded"]
+dev = ["pytest>=7.0", "statsmodels", "scipy", "hypothesis", "empyrical-reloaded", "ruff", "build", "twine"]
 
 [project.urls]
 Repository = "https://github.com/JanghyukChoi/quantbacktest"

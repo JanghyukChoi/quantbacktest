@@ -34,6 +34,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install ${{ matrix.deps }}
+          # Property-based tests (Hypothesis) run on every row; the cross-check against empyrical needs a newer pandas than the oldest row, so it is installed on the others only,
+          # and a failed install there skips that test rather than failing the build (both test files skip when their package is missing).
+          python -m pip install hypothesis
+          case "${{ matrix.label }}" in *oldest*) ;; *) python -m pip install empyrical-reloaded || echo "empyrical-reloaded not installable on this Python; the differential test will skip" ;; esac
           python -m pip install --no-deps -e .
           python -c "import pandas, numpy; print('pandas', pandas.__version__, 'numpy', numpy.__version__)"
       - name: Run every test script (each exits non-zero on failure)

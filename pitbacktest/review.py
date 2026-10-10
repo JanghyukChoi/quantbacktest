@@ -328,7 +328,7 @@ def _wilson(k: int, n: int) -> tuple[float, float]:
     den = 1 + z * z / n
     c = (p + z * z / (2 * n)) / den
     h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / den
-    return c - h, c + h
+    return min(max(c - h, 0.0), p), max(min(c + h, 1.0), p)                      # rounding must not put the point estimate outside its own interval (win rate 1 gave 0.9999999999999999)
 
 
 def review_event(panel, signal: pd.DataFrame, *, horizons=(1, 5, 20), cost_bp: float = 20.0, cost_grid=(0.0, 5.0, 10.0, 20.0, 40.0, 80.0), n_permutations: int = 200,

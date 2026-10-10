@@ -151,7 +151,7 @@ def mean_tests(net: pd.Series, *, periods_per_year: int = 252, lag: int | None =
     zz = (x - x.mean()) / (x.std(ddof=0) if x.std(ddof=0) > 0 else 1.0)
     return {"n": T, "lag": L, "mean_daily": float(mean), "nw_t": float(t), "nw_p": _norm_two_sided(t) if math.isfinite(t) else float("nan"),
             "sharpe": _sharpe(x, ppy), "sharpe_t": _sharpe(x, ppy) * math.sqrt(T / ppy) if sd > 1e-12 else float("nan"),
-            "win_rate": float(p_hat), "n_zero": int(T - nz), "sign_p": _binom_two_sided(pos, nz), "win_ci": (float(centre - half), float(centre + half)),
+            "win_rate": float(p_hat), "n_zero": int(T - nz), "sign_p": _binom_two_sided(pos, nz), "win_ci": ((min(max(float(centre - half), 0.0), float(p_hat)), max(min(float(centre + half), 1.0), float(p_hat))) if nz else (float("nan"), float("nan"))),
             "skew": float((zz ** 3).mean()), "kurtosis": float((zz ** 4).mean())}
 
 
