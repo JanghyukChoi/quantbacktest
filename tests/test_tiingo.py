@@ -228,6 +228,7 @@ def test_full_fields():
         assert np.allclose((pf.open / pf.close).stack().dropna(), 0.99)                  # adjOpen is 0.99 x adjClose in this world
         assert np.array_equal(pf.close.fillna(-1).to_numpy(), pp.close.fillna(-1).to_numpy())     # prices and eligibility are the same either way
         assert pf.eligible.equals(pp.eligible)
+        assert pf.meta["return_basis"].startswith("total")
         dc = pf.meta["div_cash"]
         assert dc.shape == pf.close.shape and (dc.fillna(0).sum(axis=0) > 0).sum() > 10
         # a full download that lacks a field is loud and saves nothing

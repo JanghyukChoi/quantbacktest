@@ -7,8 +7,10 @@ RB4 walk-forward  equals a plain-loop reference fold by fold; an always-better s
 RB5 plateau       a hill, a spike and a corner cell
 RB6 many tests    BH and Holm equal the textbook example and statsmodels
 RB7 permutations  a planted factor and a planted event reach the smallest possible p, noise does not, and the null's expected win rate equals the exact expectation
+RB11 calibration  information-free persistent signals are called significant about as often as the nominal 5 percent with the new nulls, and much more often with the old ones
 RB8 decomposition a strategy that is a style factor loads 1 on it, a market strategy plus a constant has beta 1 and that alpha
 RB9 attribution   legs, names, thirds and groups of a hand-built book equal direct sums; gross minus each cost equals net in both engines
+RB10 review fixes decompose adds up on the rows it used, zero bars stay out of the win rate, a NaN column can be chosen, unknown styles are NaN, unclassified positions have a row
 """
 from __future__ import annotations
 import math, sys, warnings
@@ -218,16 +220,16 @@ def test_permutations():
     c = rb.signal_permutation(p, cheat, 5, cost_bp=10.0, n=100, seed=0)
     assert c["p_win"] == 1 / 101 and c["p_mean"] == 1 / 101 and c["real_win_rate"] > 0.95
     rand_sig = pd.DataFrame(rng.random(p.close.shape) < 0.03, index=p.dates, columns=p.tickers) & p.eligible
-    ev = rb.signal_permutation(p, rand_sig, 5, cost_bp=10.0, n=200, seed=3)
+    ev = rb.signal_permutation(p, rand_sig, 5, cost_bp=10.0, n=200, seed=3, method="random_picks")
     usable = p.eligible.to_numpy(bool) & np.isfinite(fw5)
     fire = rand_sig.to_numpy(bool) & usable
     exp_win = sum(fire[i].sum() * ((fw5[i][usable[i]] - 0.001) > 0).mean() for i in range(len(fire)) if fire[i].any()) / fire.sum()
     se = math.sqrt(exp_win * (1 - exp_win) / fire.sum())
-    assert abs(ev["random_win_rate_mean"] - exp_win) < 3 * se / math.sqrt(1) and ev["p_win"] > 0.05, (ev["random_win_rate_mean"], exp_win, se)
+    assert abs(ev["null_win_rate_mean"] - exp_win) < 3 * se / math.sqrt(1) and ev["p_win"] > 0.05, (ev["null_win_rate_mean"], exp_win, se)
     assert ev["n_fires"] == int(fire.sum())
     _raises(lambda: rb.signal_permutation(p, rand_sig & False, 5), "at least 30")
     _raises(lambda: rb.signal_permutation(p, rand_sig, 0), "horizon")
-    print(f"RB7 a planted factor and a cheating event signal reach the smallest p (1/31, 1/101); noise p {r2['p']:.2f}; the random null's win rate {ev['random_win_rate_mean']:.4f} equals the exact expectation {exp_win:.4f}  PASS")
+    print(f"RB7 a planted factor and a cheating event signal reach the smallest p (1/31, 1/101); noise p {r2['p']:.2f}; the random null's win rate {ev['null_win_rate_mean']:.4f} equals the exact expectation {exp_win:.4f}  PASS")
 
 
 def test_decomposition():
@@ -304,6 +306,120 @@ def test_attribution():
     print(f"RB9 long {at['long_annual']:.4f} + short {at['short_annual']:.4f} = gross a year, thirds and groups match, gross minus costs equals net to 1e-6 bp in both engines  PASS")
 
 
+def test_review_fixes():
+    rng = np.random.default_rng(11)
+    # decompose: alpha plus the contributions is the mean of the rows the regression used (it was not, when the factor had more rows than the strategy)
+    idx = pd.bdate_range("2012-01-02", periods=2500)
+    f1 = pd.Series(rng.normal(0.0008, 0.01, 2500), index=idx, name="mom")
+    f2 = pd.Series(rng.normal(-0.0003, 0.012, 2500), index=idx, name="vol"); f2.iloc[:900] = np.nan
+    y = (0.5 * f1 + 0.3 * f2.fillna(0) + rng.normal(0.0002, 0.004, 2500)).iloc[-600:]
+    d = rb.decompose(y, pd.concat([f1, f2], axis=1))
+    used = pd.concat([y.rename("y"), f1, f2], axis=1).dropna()
+    assert abs(d["alpha_annual"] + sum(v["contribution_annual"] for v in d["factors"].values()) - used["y"].mean() * 252) < 1e-9, d
+    d1 = rb.decompose(y, f1.to_frame())
+    assert abs(d1["alpha_annual"] + d1["factors"]["mom"]["contribution_annual"] - y.mean() * 252) < 1e-9
+    # mean_tests: a bar with exactly zero return is no trade
+    z = pd.Series(rng.normal(0.0008, 0.01, 700), index=pd.bdate_range("2019-01-01", periods=700)); z.iloc[::7] = 0.0
+    mt = rb.mean_tests(z)
+    nz = z[z != 0]
+    assert mt["n_zero"] == 100 and abs(mt["win_rate"] - (nz > 0).mean()) < 1e-15 and abs(mt["sign_p"] - rb._binom_two_sided(int((nz > 0).sum()), len(nz))) < 1e-15
+    assert mt["win_ci"][0] < mt["win_rate"] < mt["win_ci"][1]
+    # walk-forward: a column with leading NaN bars is scored on the bars it has and can be chosen; the in-sample figure is a Sharpe whatever `select` is
+    T = 500
+    ix = pd.bdate_range("2019-01-01", periods=T)
+    R = pd.DataFrame({"a": rng.normal(0, 0.01, T), "b": rng.normal(0.0004, 0.01, T), "c": 0.004 + rng.normal(0, 0.01, T)}, index=ix)
+    R.iloc[:30, 2] = np.nan
+    wf = rb.walk_forward(R, train=100, test=50)
+    assert wf["chosen_counts"].get("c", 0) >= 0.8 * wf["n_folds"], wf["chosen_counts"]
+    wf2 = rb.walk_forward(R, train=100, test=50, select=lambda col: float(np.mean(col)) * 1e4)
+    f0 = wf2["folds"].iloc[0]
+    tr = R.iloc[:100][f0["chosen"]].dropna().to_numpy()
+    assert abs(f0["is_sharpe"] - tr.mean() / tr.std(ddof=1) * math.sqrt(252)) < 1e-9 and abs(f0["is_score"] - tr.mean() * 1e4) < 1e-9 and wf2["mean_is_sharpe"] < 30    # in Sharpe units
+    # style factors: unknown before the characteristic exists
+    p, _ = make_panel(n_days=700, n_stocks=60)
+    st = _q(lambda: rb.style_factor_returns(p))
+    assert st["momentum"].loc[:p.dates[250]].isna().all() and st["momentum"].loc[p.dates[300]:].notna().all()          # the 12-1 month characteristic needs 252 bars
+    assert st["reversal"].first_valid_index() >= p.dates[60] and st["momentum"].first_valid_index() > st["reversal"].first_valid_index()
+    # attribution: positions held on a bar where the name was not eligible are their own row, and the rows add up to the whole
+    pe = make_panel(n_days=700, n_stocks=60)[0]
+    el = pd.DataFrame(np.random.default_rng(4).random(pe.close.shape) < 0.7, index=pe.dates, columns=pe.tickers)
+    pp = q.Panel(close=pe.close, eligible=el | (pe.eligible & False), mkt_cap=pe.mkt_cap, volume=pe.volume, market="T")
+    fct = -pp.close.pct_change(5)
+    res = _q(lambda: q.backtest_portfolio(pp, fct, long_q=0.2, short_q=0.2, hold=5, spread_bp=0.0, benchmark=None, grid=False))
+    at = rb.attribution(pp, res)
+    assert "not classified" in at["by_size"] and abs(sum(v["contribution_annual"] for v in at["by_size"].values()) - at["gross_annual"]) < 1e-9
+    assert abs(sum(v["exposure_share"] for v in at["by_size"].values()) - 1.0) < 1e-9
+    # plateau: a one-parameter table has a one-element best_at and says why it cannot tell
+    pl = rb.parameter_plateau(pd.Series([-0.5, -0.2, -0.9, -1.0], index=[3, 5, 10, 20]))
+    assert pl["best_at"] == (5,) and pl["verdict"] == "undetermined" and pl["reason"] == "no setting has a positive Sharpe ratio"
+    assert rb.parameter_plateau(pd.Series([0.1, 0.9, 0.8, 0.2], index=[3, 5, 10, 20]))["reason"] == ""
+    print("RB10 decompose adds up on its own rows, zero bars stay out of the win rate, a NaN column can be chosen, unknown styles are NaN, unclassified positions have a row  PASS")
+
+
+def _iid_panel(seed, T=500, N=50, drift_sd=0.0):
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2019-01-01", periods=T)
+    cols = [f"S{i:02d}" for i in range(N)]
+    r = rng.normal(0, 0.012, (T, N)) + rng.normal(0, drift_sd / 252, N)               # a true drift of its own for each security
+    c = pd.DataFrame(100 * np.exp(np.cumsum(r, 0)), index=idx, columns=cols)
+    el = pd.DataFrame(True, index=idx, columns=cols); el.iloc[:20] = False
+    return q.Panel(close=c, eligible=el, volume=pd.DataFrame(1e6, index=idx, columns=cols), market="T"), rng
+
+
+def test_shift_null_exact_and_calibrated():
+    # the time-shifted null against a plain loop over every admissible shift: its mean win rate is the average of the win rates of all shifts
+    p, rng = make_panel(n_days=400, n_stocks=30)
+    sig = pd.DataFrame(rng.random(p.close.shape) < 0.04, index=p.dates, columns=p.tickers) & p.eligible
+    fw = p.forward(5).to_numpy(np.float64)
+    usable = p.eligible.to_numpy(bool) & np.isfinite(fw)
+    f0 = sig.to_numpy(bool)
+    T = len(fw); lo = max(2 * 5, 21)
+    wins = []
+    for sft in range(lo, T - lo + 1):
+        rolled = np.roll(f0, sft, axis=0) & usable
+        v = fw[rolled] - 0.001
+        if len(v):
+            wins.append((v > 0).mean())
+    r = rb.signal_permutation(p, sig, 5, 10.0, n=400, seed=5)
+    sd = float(np.std(wins, ddof=1))
+    assert abs(r["null_win_rate_mean"] - np.mean(wins)) < 4 * sd / math.sqrt(400), (r["null_win_rate_mean"], np.mean(wins), sd)
+    assert r["method"] == "shift" and rb.signal_permutation(p, sig, 5, 10.0, n=400, seed=5) == r
+    cheat = pd.DataFrame(fw > np.nanpercentile(fw, 90), index=p.dates, columns=p.tickers) & p.eligible
+    assert rb.signal_permutation(p, cheat, 5, 10.0, n=100, seed=0)["p_win"] == 1 / 101                   # moving the cheating signal in time destroys it
+    _raises(lambda: rb.signal_permutation(p, sig, 5, method="x"), "method")
+    _raises(lambda: rb.signal_permutation(p, sig & False, 5, n=20), "fires")
+
+
+def test_calibration():
+    # (a) an event signal with no information whose fires persist: each security fires on one 60-bar spell. 60 panels with iid returns.
+    K = 60
+    rej = {"shift": 0, "random_picks": 0}
+    for s in range(K):
+        p, rng = _iid_panel(s)
+        sig = pd.DataFrame(False, index=p.dates, columns=p.tickers)
+        for j in range(len(p.tickers)):
+            a = int(rng.integers(30, 430)); sig.iloc[a:a + 60, j] = True
+        for m in rej:
+            rej[m] += rb.signal_permutation(p, sig, 5, 0.0, n=200, seed=s, method=m)["p_win"] <= 0.05
+    sh, rp = rej["shift"] / K, rej["random_picks"] / K
+    assert sh <= 0.12 and rp >= 0.10, (sh, rp)                                  # about 5 percent (a binomial of 60 at 0.05 reaches 0.12 about 2 percent of the time) against the old null's 13
+    # (b) a factor with fixed random scores on securities whose true drifts differ (sd 25 percent a year): no information in it
+    K2 = 60
+    rej2 = {"labels": 0, "daily": 0}
+    for s in range(K2):
+        p, rng = _iid_panel(100 + s, N=40, drift_sd=0.25)
+        f = pd.DataFrame(np.tile(rng.standard_normal(40), (len(p.dates), 1)), index=p.dates, columns=p.tickers).where(p.eligible)
+        for m in rej2:
+            rej2[m] += _q(lambda: rb.factor_permutation(p, f, n=29, seed=s, method=m, long_q=0.3, short_q=0.3, hold=5))["p"] <= 0.05
+    la, da = rej2["labels"] / K2, rej2["daily"] / K2
+    p0, rng0 = _iid_panel(100, N=40, drift_sd=0.25)                                                           # the default is the relabelled null, not the daily shuffle
+    f0 = pd.DataFrame(np.tile(rng0.standard_normal(40), (len(p0.dates), 1)), index=p0.dates, columns=p0.tickers).where(p0.eligible)
+    assert _q(lambda: rb.factor_permutation(p0, f0, n=29, seed=0, long_q=0.3, short_q=0.3, hold=5))["method"] == "labels"
+    assert rb.signal_permutation(p0, pd.DataFrame(rng0.random(p0.close.shape) < 0.03, index=p0.dates, columns=p0.tickers) & p0.eligible, 5, n=20)["method"] == "shift"
+    assert la <= 0.13 and da >= 0.15, (la, da)                                  # the relabelled null is near its nominal 5 percent (60 panels: 0.13 is 2 in 100), the daily shuffle is far above it
+    print(f"RB11 information-free persistent signals called significant at the nominal 5 percent: time-shifted events {sh:.0%} (random picks {rp:.0%}), relabelled factors {la:.0%} (daily shuffle {da:.0%})  PASS")
+
+
 if __name__ == "__main__":
     test_market_relative()
     test_mean_tests()
@@ -314,4 +430,7 @@ if __name__ == "__main__":
     test_permutations()
     test_decomposition()
     test_attribution()
+    test_review_fixes()
+    test_shift_null_exact_and_calibrated()
+    test_calibration()
     print("robustness tests: all passed")

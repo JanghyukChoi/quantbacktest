@@ -19,6 +19,20 @@ no strategy's performance.
 Defects found only by running on real data (synthetic tests had missed them): delisted positions frozen for ever by a trade mask; a contract absent for years that came back
 and was treated as one security; false returns of thousands of percent when a consolidation falls inside a trading suspension (Korea).
 
+## Known simplifications, with their size
+
+- **Costs are charged on target changes, not on drifting back to target.** The engines return each bar to the target weights but charge trading cost only on the change of the target. For a
+  5-bar-hold reversal portfolio, measured on Binance and on KRX, returning to target after prices moved would add 2 to 3 percent to the one-way turnover (about 10 to 14 bp a year at a 10 bp
+  round-trip spread). For a book whose targets rarely change it is a larger share of a small number.
+- **Dividends, taxes and interest.** The KRX series is a price series (no dividends); a dividend tax, a capital-gains tax and interest on idle cash are not modelled. The review page says
+  when returns are price only.
+- **What a permutation does and does not say.** The factor permutation gives each security another security's factor history and compares gross Sharpe ratios: it asks whether the factor's
+  link to the securities' own returns carries information. The event permutation moves the whole table of fires in time: it asks whether *when* the signal fires carries information. Both were
+  calibrated on information-free persistent signals (60 and 60 simulated samples: about 5 percent called significant at the nominal 5, against 17 and 20 percent for the earlier nulls). Neither says
+  whether the strategy is tradable, and a signal whose only edge is *which* securities it picks (a persistent tilt to high-drift names) is not distinguished from picking those names at any time.
+- **The walk-forward runs on a matrix of whole-sample returns** of each setting, which is exact because a setting's signal uses only the past; it does not re-estimate anything inside a fold.
+- **Brinson attribution is arithmetic and gross of costs**, for long-only books against a market-capitalisation or equal-weighted benchmark; it does not link over time geometrically.
+
 ## Status by part
 
 | Part | Evidence | Status |

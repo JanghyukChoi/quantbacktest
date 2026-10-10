@@ -71,6 +71,7 @@ def test_adapter():
     c, r = p.close, p.ret1()
     assert "222220" in c.columns and bool(p.delist_after["222220"].sum() == 1)                      # K1
     assert c["222220"].last_valid_index() == DAYS[200] and p.meta["delisted_in_panel"] >= 1
+    assert p.meta["return_basis"].startswith("price (") and "dividends are not in the series" in p.meta["return_basis"]                  # the page must be able to say so
     assert abs(float(r.loc[DAYS[150], "111110"])) < 0.05                                           # K2: no -98% on the split day
     assert float(c["111110"].iloc[0]) == 100.0 or float(c["111110"].iloc[1]) > 50
     assert np.isnan(r.loc[DAYS[100], "333330"])                                                    # K3: listing-day return dropped

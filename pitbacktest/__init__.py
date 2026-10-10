@@ -9,6 +9,7 @@ Review: one call that runs a strategy through the tests an institution would ask
     review_portfolio()   factor portfolio: luck (permutation, t-tests), market-relative, factor decomposition, walk-forward, settings, cost
     review_event()       event signal: win rate against a random pick, cost, years, permutation, the signal held as a portfolio
     robustness           the building blocks (walk_forward, factor_permutation, signal_permutation, market_relative, bh_fdr, ...)
+    compare()            up to six strategies side by side; blend() mixes their holdings; strategy_correlation() their return correlation
 
 Design principles
     - The core is plain pandas and numpy; data sources live in `adapters`.
@@ -27,7 +28,8 @@ from .ledger import Ledger
 from .weights import backtest_weights, capacity_curve, ImpactModel
 from .shorting import shortable_from_bans
 from .review import review_portfolio, review_event, event_weights
+from .compare import compare, blend, strategy_correlation
 from ._version import __version__
 
 __all__ = ["shortable_from_bans", "execution", "validation", "analytics", "Ledger", "backtest_weights", "capacity_curve", "ImpactModel", "Panel", "build_pit_eligible", "GateConfig", "screen",
-           "backtest_event", "backtest_portfolio", "assert_timing", "robustness", "review_portfolio", "review_event", "event_weights"]
+           "backtest_event", "backtest_portfolio", "assert_timing", "robustness", "review_portfolio", "review_event", "event_weights", "compare", "blend", "strategy_correlation"]

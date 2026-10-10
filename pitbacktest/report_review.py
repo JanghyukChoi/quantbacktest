@@ -41,6 +41,10 @@ def _thin(ticks: list[float], gap: float = 0.12) -> list[float]:
     return out
 
 
+def _ok_(v) -> bool:
+    return v is not None and isinstance(v, (int, float)) and math.isfinite(v)
+
+
 def _pv(p) -> str:
     return "n/a" if p is None or not math.isfinite(p) else ("<0.001" if p < 0.001 else f"{p:.3f}")
 
@@ -162,26 +166,31 @@ def _portfolio_parts(rv):
     m, t = rv.result.metrics, rv.mean
     # --- luck
     rows = [
-        _row("Mean return is not zero (Newey-West t)", f"t = {_num(t['nw_t'])}, p = {_pv(t['nw_p'])}", "ok" if abs(t["nw_t"]) >= 2.5 else "w",
-             "above the 2.5 bar" if abs(t["nw_t"]) >= 2.5 else "below the 2.5 bar: no evidence that the mean differs from zero"),
-        _row("Sharpe t-statistic (Sharpe x sqrt(years))", _num(t["sharpe_t"]), "ok" if _num(t["sharpe_t"]) != "n/a" and t["sharpe_t"] >= 3.0 else "w",
-             "at or above 3, the bar Harvey, Liu and Zhu suggest for a new factor" if _num(t["sharpe_t"]) != "n/a" and t["sharpe_t"] >= 3.0 else "below 3, the bar Harvey, Liu and Zhu suggest for a new factor"),
-        _row("Bars with a positive return", f"{_pct(t['win_rate'])} (95% {_pct(t['win_ci'][0])} to {_pct(t['win_ci'][1])})", "w" if t["win_ci"][0] <= 0.5 <= t["win_ci"][1] else "ok",
-             f"sign test p = {_pv(t['sign_p'])}"),
+        _row("Mean return is not zero (Newey-West t)", f"t = {_num(t['nw_t'])}, p = {_pv(t['nw_p'])}", "ok" if t["nw_t"] >= 2.5 else ("bad" if t["nw_t"] <= -2.5 else "w"),
+             "above the 2.5 bar" if t["nw_t"] >= 2.5 else ("significantly NEGATIVE: the mean return is below zero beyond what chance explains" if t["nw_t"] <= -2.5
+                                                           else "within 2.5 of zero: no evidence that the mean differs from zero")),
+        _row("Sharpe t-statistic (Sharpe x sqrt(years))", _num(t["sharpe_t"]), "ok" if _ok_(t["sharpe_t"]) and t["sharpe_t"] >= 3.0 else ("bad" if _ok_(t["sharpe_t"]) and t["sharpe_t"] <= -3.0 else "w"),
+             "at or above 3, the bar Harvey, Liu and Zhu suggest for a new factor" if _ok_(t["sharpe_t"]) and t["sharpe_t"] >= 3.0 else
+             ("at or below -3: significantly negative" if _ok_(t["sharpe_t"]) and t["sharpe_t"] <= -3.0 else "between -3 and 3, the bar Harvey, Liu and Zhu suggest for a new factor")),
+        _row("Bars with a positive return (zero bars left out)", f"{_pct(t['win_rate'])} (95% {_pct(t['win_ci'][0])} to {_pct(t['win_ci'][1])})",
+             "ok" if t["win_ci"][0] > 0.5 else ("bad" if t["win_ci"][1] < 0.5 else "w"),
+             f"sign test p = {_pv(t['sign_p'])}" + (f"; {t['n_zero']} bars with exactly zero return" if t.get("n_zero") else "") +
+             ("; fewer than half the bars won" if t["win_ci"][1] < 0.5 else "")),
         _row("Fat tails", f"skew {_num(t['skew'])}, kurtosis {_num(t['kurtosis'])}", "w" if t["kurtosis"] > 5 else "ok", "kurtosis 3 is normal; fat tails make the t-values above too optimistic" if t["kurtosis"] > 5 else "close to normal"),
     ]
     if rv.sharpe_ci is not None and all(math.isfinite(rv.sharpe_ci[k]) for k in ("lo", "hi")):
-        rows.append(_row("Sharpe, bootstrap interval", f"{_num(rv.sharpe_ci['sharpe'])} ({_num(rv.sharpe_ci['lo'])} to {_num(rv.sharpe_ci['hi'])})", "w" if rv.sharpe_ci["lo"] <= 0 else "ok",
-                         "the interval includes 0" if rv.sharpe_ci["lo"] <= 0 else "the interval excludes 0"))
+        _lo, _hi = rv.sharpe_ci["lo"], rv.sharpe_ci["hi"]
+        rows.append(_row("Sharpe, bootstrap interval", f"{_num(rv.sharpe_ci['sharpe'])} ({_num(_lo)} to {_num(_hi)})", "ok" if _lo > 0 else ("bad" if _hi < 0 else "w"),
+                         "the interval is above 0" if _lo > 0 else ("the interval is entirely below 0" if _hi < 0 else "the interval includes 0")))
     perm_html = ""
     if rv.permutation is not None:
         pm = rv.permutation
         beat = int(round((pm["p"] * (pm["n"] + 1)) - 1))
         ok = pm["p"] <= 0.05
-        rows.append(_row("Factor shuffled across securities, rerun (before costs)", f"real gross Sharpe {_num(pm['real_sharpe'])} vs shuffled mean {_num(pm['null_mean'])}, 95th {_num(pm['null_p95'])}", "ok" if ok else "w",
-                         f"{beat} of {pm['n']} shuffles did as well (p = {_pv(pm['p'])})"))
-        perm_html = _hist("perm", f"Gross Sharpe of the same backtest with the factor shuffled ({pm['n']} times, before costs); the line is the real strategy", pm["null"], pm["real_sharpe"], f"real {_num(pm['real_sharpe'])}")
-        items.append(("ok" if ok else "w", "Against shuffled factors", f"{beat} of {pm['n']} shuffles of the factor matched or beat the real gross Sharpe ratio (p = {_pv(pm['p'])}); the comparison is before costs, which are judged separately."))
+        rows.append(_row("Each security given another's factor history, rerun (before costs)", f"real gross Sharpe {_num(pm['real_sharpe'])} vs relabelled mean {_num(pm['null_mean'])}, 95th {_num(pm['null_p95'])}", "ok" if ok else "w",
+                         f"{beat} of {pm['n']} relabellings did as well (p = {_pv(pm['p'])})"))
+        perm_html = _hist("perm", f"Gross Sharpe of the same backtest with each security given another security's factor history ({pm['n']} times, before costs); the line is the real strategy", pm["null"], pm["real_sharpe"], f"real {_num(pm['real_sharpe'])}")
+        items.append(("ok" if ok else "w", "Against relabelled factors", f"{beat} of {pm['n']} relabellings of the factor matched or beat the real gross Sharpe ratio (p = {_pv(pm['p'])}); the comparison is before costs, which are judged separately."))
     if rv.deflated is not None:
         d = rv.deflated
         ok = math.isfinite(d["dsr"]) and d["dsr"] >= 0.95
@@ -247,6 +256,38 @@ def _portfolio_parts(rv):
         attr.append(f'<div class="wrap" style="margin-top:10px"><table><tr><th>From gross to net (per year)</th><th>basis points</th></tr><tr><td>Gross return</td><td>{wfa["gross_bp"]:+,.0f} bp</td></tr>{cw}'
                     + (f'<tr><td>other (a freeze markdown, a ruin)</td><td>{wfa["residual_bp"]:+,.0f} bp</td></tr>' if abs(wfa["residual_bp"]) >= 0.5 else "")
                     + f'<tr><td><b>Net return</b></td><td><b>{wfa["net_bp"]:+,.0f} bp</b></td></tr></table></div></div>')
+    # --- regimes, risk, what it held, Brinson
+    extra = []
+    if rv.regimes is not None:
+        rg = rv.regimes
+        rrows = "".join(f"<tr><td>{_esc(i)}</td><td>{int(r.bars):,} ({_pct(r.share, 0)})</td><td>{_pct(r.mean_annual)}</td><td>{_num(r.sharpe)}</td><td>{_pct(r.win_rate, 0)}</td></tr>" for i, r in zip(rg["table"].index, rg["table"].itertuples()))
+        extra.append('<h2>In which markets did it work?</h2><div class="card wrap"><table><tr><th>Regime (set by the benchmark alone)</th><th>Bars</th><th>Mean return per year</th><th>Sharpe</th><th>Bars up</th></tr>'
+                     + rrows + "</table>" + f'<p class="note">The benchmark\'s worst fall in the sample was {_pct(rg["max_benchmark_drawdown"])}. ' +
+                     ("The sample contains a bear market." if rg["sample_has_bear"] else "The sample contains **no** bear market: nothing here says how the strategy behaves in one.").replace("**", "") + "</p></div>")
+        if not rg["sample_has_bear"]:
+            items.append(("w", "No bear market", f"the benchmark never fell {rg['bear']:.0%} below its peak in this sample (worst {_pct(rg['max_benchmark_drawdown'])}): the strategy has not been tested in one."))
+    if rv.risk is not None:
+        k = rv.risk
+        dd = rv.drawdown_dist
+        rrows2 = (_row("Value at risk, 95% / 99% (historical)", f"{_pct(k['var_95'], 2)} / {_pct(k['var_99'], 2)}", "ok", "the return that 5 and 1 percent of bars fell below")
+                  + _row("Expected shortfall, 95% / 99%", f"{_pct(k['cvar_95'], 2)} / {_pct(k['cvar_99'], 2)}", "ok", "the mean return of the bars below the value at risk")
+                  + _row("Value at risk at today's volatility, 95% / 99%", f"{_pct(k['var_95_now'], 2)} / {_pct(k['var_99_now'], 2)}", "ok", f"the same shape of returns scaled to the current volatility ({_pct(k['vol_now'])} a year)")
+                  + _row("Normal-distribution value at risk, 95%", _pct(k["var_95_normal"], 2), "w" if k["var_95_normal"] > k["var_95"] + 0.002 else "ok", "what a normal distribution would give: the historical tail is fatter" if k["var_95_normal"] > k["var_95"] + 0.002 else "close to the historical figure")
+                  + _row("Worst bar, worst month", f"{_pct(k['worst_bar'], 1)}, {_pct(k['worst_month'], 1)}", "ok", f"best bar {_pct(k['best_bar'], 1)}, best month {_pct(k['best_month'], 1)}; tail ratio {_num(k['tail_ratio'])}")
+                  + _row("Longest time below a previous peak", f"{k['max_dd_bars']:,} bars", "ok", f"{_pct(k['share_underwater'], 0)} of the bars were spent below a peak; ulcer index {_pct(k['ulcer_index'], 1)}")
+                  + _row("Skew, kurtosis", f"{_num(k['skew'])}, {_num(k['kurtosis'])}", "w" if k["skew"] < -0.5 else "ok", "negative skew: more large losses than large gains" if k["skew"] < -0.5 else "3 is normal kurtosis"))
+        ddhtml = ""
+        if dd is not None:
+            lab = ["5th percentile", "25th", "median", "75th", "95th"]
+            vals = [dd["p05"], dd["p25"], dd["p50"], dd["p75"], dd["p95"]]
+            ddhtml = _barchart("ddd", f"Maximum drawdown of {dd['n']:,} resampled histories of the same returns (the line is the realised one)", lab, vals, refs=[(dd["realized"], f"realised {_pct(dd['realized'], 0)}")],
+                               yfmt=lambda v: f"{v * 100:.0f}%", ymin=min(min(vals), dd["realized"]) * 1.15, ymax=0.0,
+                               tips=[f"{a}: {_pct(v, 1)}" for a, v in zip(lab, vals)])
+            ddhtml += (f'<p class="note">{_pct(dd["p_worse"], 0)} of the resampled histories fell deeper than the realised {_pct(dd["realized"], 1)}; {_pct(dd["p_exceed_20"], 0)} fell more than 20 percent, '
+                       f'{_pct(dd["p_exceed_30"], 0)} more than 30 and {_pct(dd["p_exceed_50"], 0)} more than 50. The realised drawdown is one draw.</p>')
+            if dd["p_worse"] >= 0.75:
+                items.append(("w", "A kind history", f"{_pct(dd['p_worse'], 0)} of resampled histories of the same returns fell deeper than the realised {_pct(dd['realized'], 1)}; the median was {_pct(dd['p50'], 1)}."))
+        extra.append('<h2>How bad can it get?</h2><div class="card wrap"><table class="t"><tr><th>Measure</th><th>Result</th><th>Reading</th></tr>' + rrows2 + "</table>" + ddhtml + "</div>")
     # --- over time
     s_ = rv.subperiods
     ot = [f'<h2>Does it hold over time?</h2><div class="card wrap"><table class="t"><tr><th>Measure</th><th>Result</th><th>Reading</th></tr>'
@@ -276,8 +317,14 @@ def _portfolio_parts(rv):
     if rv.grid_table is not None:
         pl = rv.plateau
         verdict = {"plateau": ("ok", "the neighbours of the best setting keep most of its Sharpe: a plateau"), "hill": ("w", "the neighbours keep part of it: a hill"),
-                   "spike": ("w", "the neighbours lose almost all of it: a spike, the sign of a search rather than a property"), "undetermined": ("w", "no setting has a positive Sharpe ratio, so there is nothing to call a plateau or a spike")}[pl["verdict"]] if pl else ("w", "")
-        settings.append('<h2>Is the setting a spike?</h2><div class="card">' + _heat_grid(rv.grid_table if rv.grid_table.shape[1] > 1 else rv.grid_table.T.rename_axis(columns=rv.grid_table.index.name), pl["best_at"] if pl else None) +
+                   "spike": ("w", "the neighbours lose almost all of it: a spike, the sign of a search rather than a property"), "undetermined": ("w", (pl["reason"] if pl else "") + ", so there is nothing to call a plateau or a spike")}[pl["verdict"]] if pl else ("w", "")
+        gt_ = rv.grid_table
+        if isinstance(gt_, pd.Series):                                                       # one parameter: a single row, the parameter named on the left
+            show = gt_.to_frame().T.rename(index={gt_.name: str(gt_.index.name)}).rename_axis(columns=None)
+            best_cell = (show.index[0], pl["best_at"][0]) if pl else None
+        else:
+            show, best_cell = gt_, (pl["best_at"] if pl else None)
+        settings.append('<h2>Is the setting a spike?</h2><div class="card">' + _heat_grid(show, best_cell) +
                         (f'<p class="note">{_rd(verdict[0])}Best setting {_esc(", ".join(str(x) for x in pl["best_at"]))} (Sharpe {_num(pl["best"])}); its {pl["n_neighbours"]} neighbours have an average Sharpe of {_num(pl["neighbour_mean"])}. {_esc(verdict[1])}. '
                          f'{_pct(pl["grid_positive"], 0)} of all settings have a positive Sharpe.</p>' if pl else "") + "</div>")
         if pl:
@@ -290,7 +337,45 @@ def _portfolio_parts(rv):
                         f'<p class="note">The Sharpe ratio stays above 0 up to {max(pos):.0f} bp of the spreads tried.</p></div>' if pos else
                         '<h2>How much cost can it take?</h2><div class="card wrap"><table><tr><th>Round-trip spread</th><th>Sharpe</th><th>CAGR</th></tr>' + rowsc +
                         '</table><p class="note">The Sharpe ratio is not above 0 at any of the spreads tried.</p></div>')
-    return items, "".join(luck) + "".join(attr), "".join(ot) + "".join(settings)
+    hold = []
+    if rv.holdings is not None:
+        h = rv.holdings
+        trows = "".join(f"<tr><td>{_esc(k_)}</td><td>{_pct(v, 2)}</td></tr>" for k_, v in h["top_holdings"].items())
+        hold.append('<h2>What it held, and how much it traded</h2><div class="card wrap"><table class="t"><tr><th>Measure</th><th>Result</th><th>Reading</th></tr>'
+                    + _row("Positions held, long / short", f"{_num(h['avg_long'], 0)} / {_num(h['avg_short'], 0)}", "ok", "mean number of securities on bars with a position")
+                    + _row("Effective number of equal positions, long / short", f"{_num(h['effective_n_long'], 1)} / {_num(h['effective_n_short'], 1)}", "ok" if h["effective_n_long"] >= 0.5 * max(h["avg_long"], 1) else "w",
+                           "1 over the sum of squared weights: far below the count means a few names dominate")
+                    + _row("Largest weight in a leg (mean)", f"{_pct(h['max_weight_long'], 0)} / {_pct(h['max_weight_short'], 0)}", "ok", "as a share of the leg")
+                    + _row("Turnover, per bar / per 21 bars", f"{_pct(h['turnover_per_bar'], 1)} / {_pct(h['turnover_per_month'], 0)}", "w" if h["turnover_per_month"] > 1.0 else "ok",
+                           "one-way share of the book; above 100 percent a month the costs dominate the question" if h["turnover_per_month"] > 1.0 else "one-way share of the book")
+                    + _row("Trades per year, mean trade", f"{h['trades_per_year']:,.0f}, {_pct(h['avg_trade'], 2)}", "ok", "security-bars on which the position changed; the mean size of the change")
+                    + _row("Implied holding period", f"{_num(h['implied_holding_bars'], 1)} bars", "ok", "average gross exposure over one-way turnover")
+                    + f'</table><div class="wrap" style="margin-top:10px"><table><tr><th>Largest average weights</th><th>weight</th></tr>{trows}</table></div></div>')
+    bri = []
+    if rv.brinson is not None:
+        b = rv.brinson
+        rows_b = "".join(f"<tr><td>{_esc(g)}</td><td>{_pct(b['allocation'][g], 2)}</td><td>{_pct(b['selection'][g], 2)}</td><td>{_pct(b['interaction'][g], 2)}</td></tr>" for g in b["groups"])
+        tt = b["total"]
+        bri.append('<h2>Allocation or selection?</h2><div class="card wrap"><table><tr><th>Group</th><th>Allocation</th><th>Selection</th><th>Interaction</th></tr>' + rows_b +
+                   f'<tr><td><b>Total</b></td><td><b>{_pct(tt["allocation"], 2)}</b></td><td><b>{_pct(tt["selection"], 2)}</b></td><td><b>{_pct(tt["interaction"], 2)}</b></td></tr></table>'
+                   f'<p class="note">Per year, gross of costs, long-only against the {b["benchmark"]}-weighted benchmark: the three add up to {_pct(b["excess_gross_annual"], 2)}, the portfolio\'s gross return minus the benchmark\'s. '
+                   "Allocation: being over- or under-weight the right groups. Selection: picking the right securities inside a group.</p></div>")
+    return items, "".join(luck) + "".join(extra) + "".join(attr) + "".join(hold) + "".join(bri), "".join(ot) + "".join(split_html_parts(rv, items)) + "".join(settings)
+
+
+def split_html_parts(rv, items) -> list:
+    """The frozen-date comparison, when a `split_date` was given."""
+    if rv.split is None:
+        return []
+    sp = rv.split
+    a, b = sp["in_sample"], sp["out_of_sample"]
+    keep = math.isfinite(sp["sharpe_ratio"]) and sp["sharpe_ratio"] >= 0.5 and b["sharpe"] > 0
+    rows = "".join(f"<tr><td>{lab}</td><td>{_esc(side['start'])} to {_esc(side['end'])}</td><td>{side['bars']:,}</td><td>{_pct(side['mean_annual'])}</td><td>{_pct(side['vol_annual'])}</td><td>{_num(side['sharpe'])}</td><td>{_pct(side['win_rate'], 0)}</td></tr>"
+                   for lab, side in (("Before", a), ("After", b)))
+    items.append(("ok" if keep else "w", "Frozen date", f"Sharpe {_num(a['sharpe'])} before {sp['split']} and {_num(b['sharpe'])} after it (ratio {_num(sp['sharpe_ratio'])}); the mean return changed with t = {_num(sp['mean_diff_t'])}."))
+    return ['<h2>What happened after the frozen date?</h2><div class="card wrap"><table><tr><th></th><th>Period</th><th>Bars</th><th>Mean return per year</th><th>Volatility</th><th>Sharpe</th><th>Bars up</th></tr>' + rows + "</table>"
+            f'<p class="note">Change in the mean after the date: t = {_num(sp["mean_diff_t"])}, p = {_pv(sp["mean_diff_p"])} (Welch, bars treated as independent). Out-of-sample over in-sample Sharpe: {_num(sp["sharpe_ratio"])}. '
+            "This means something only if the date was fixed before the later results were seen.</p></div>"]
 
 
 def _review_page(inner_open: str, inner: str, title: str) -> str:
@@ -325,9 +410,9 @@ def _event_page(rv, *, title: str | None = None, max_points: int = 900) -> str:
     if rv.permutation is not None:
         pm = rv.permutation
         ok = pm["p_win"] <= 0.05
-        items.append(("ok" if ok else "w", "Against random picks", f"picking the same number of securities at random on each day won {pm['random_win_rate_mean'] * 100:.1f}% on average "
-                      f"(95th percentile {pm['random_win_rate_p95'] * 100:.1f}%); the signal won {pm['real_win_rate'] * 100:.1f}% (p = {_pv(pm['p_win'])}). Mean return: signal {pm['real_mean_bp']:+.0f} bp, "
-                      f"random {pm['random_mean_bp_mean']:+.0f} bp (p = {_pv(pm['p_mean'])})."))
+        items.append(("ok" if ok else "w", "Against the signal moved in time", f"{pm['n']} copies of the signal, each moved in time by a random amount (how often and on which securities it fires are kept), won "
+                      f"{pm['null_win_rate_mean'] * 100:.1f}% on average (95th percentile {pm['null_win_rate_p95'] * 100:.1f}%); the signal won {pm['real_win_rate'] * 100:.1f}% (p = {_pv(pm['p_win'])}). "
+                      f"Mean return: signal {pm['real_mean_bp']:+.0f} bp, moved copies {pm['null_mean_bp_mean']:+.0f} bp (p = {_pv(pm['p_mean'])})."))
     if st["skew_warning"]:
         items.append(("w", "Mean and median disagree", "the mean trade is positive and the median negative: a few large winners carry many small losses. Fine for a portfolio, bad for an alert."))
     de = rv.daily_excess
@@ -338,7 +423,7 @@ def _event_page(rv, *, title: str | None = None, max_points: int = 900) -> str:
     lis = "".join(f'<li class="{k}"><span class="ic">{icon[k]}</span><span class="lab">{_esc(t)}.</span> {_esc(x)}</li>' for k, t, x in items)
     read = f'<section class="card read {cls}"><div class="lab">Read this first: what limits these numbers</div><ul>{lis}</ul></section>'
     tiles = "".join([_tile("Win rate", f"{st['win_rate']:.1f}%", f"random pick {st['base_rate']:.1f}%, lift {st['lift_pp']:+.1f} points"),
-                     _tile("Trades", f"{st['n_trades']:,}", f"{rv.streak['longest_losing_streak']} losses in a row at most"),
+                     _tile("Trades", f"{st['n_trades']:,}", f"{rv.streak['longest_losing_streak']} losing fire-days in a row at most"),
                      _tile("Mean trade", f"{st['mean_bp']:+.0f} bp", f"median {st['median_bp']:+.0f} bp, after {rv.cost_bp:.0f} bp"),
                      _tile("Payoff", _num(st["payoff"]), f"average win {st['avg_win_bp']:+.0f}, loss {st['avg_loss_bp']:+.0f} bp"),
                      _tile("Horizon", f"{h} bars", f"the best by lift of {len(ht)} tried" if len(ht) > 1 else "")])
@@ -349,10 +434,10 @@ def _event_page(rv, *, title: str | None = None, max_points: int = 900) -> str:
     ct = rv.cost_table
     cost_chart = _chart("cost", f"Win rate against the round-trip cost (holding {h} bars)", ct.index.to_numpy(float),
                         [{"name": "Win rate", "y": (ct["win_rate"] / 100).to_numpy(), "color": "var(--s1)", "fmt": "pct"},
-                         {"name": "Random pick (at the applied cost)", "y": np.full(len(ct), st["base_rate"] / 100), "color": "var(--muted)", "fmt": "pct"}],
+                         {"name": "Random pick on the same days (at each cost)", "y": (ct["base_rate"] / 100).to_numpy(), "color": "var(--muted)", "fmt": "pct"}],
                         yfmt="pct", xfmt=lambda v: f"{v:.0f} bp", height=220, xticks=_thin([float(v) for v in ct.index]))
-    crow = "".join(f"<tr><td>{c:.0f} bp</td><td>{r.win_rate:.1f}%</td><td>{r.mean_bp:+.0f}</td><td>{r.median_bp:+.0f}</td></tr>" for c, r in zip(ct.index, ct.itertuples()))
-    above = [c for c, r in zip(ct.index, ct.itertuples()) if r.win_rate > 50.0]
+    crow = "".join(f"<tr><td>{c:.0f} bp</td><td>{r.win_rate:.1f}%</td><td>{r.base_rate:.1f}%</td><td>{r.lift_pp:+.1f}</td><td>{r.mean_bp:+.0f}</td><td>{r.median_bp:+.0f}</td></tr>" for c, r in zip(ct.index, ct.itertuples()))
+    above = [c for c, r in zip(ct.index, ct.itertuples()) if r.lift_pp > 0.0]
     yr = rv.yearly
     ybar = _barchart("yearly", "Win rate by year (the line is 50 percent; the other is the random pick's rate over all years)", [str(i) for i in yr.index], yr["win_rate"].to_numpy(),
                      refs=[(st["base_rate"], f"random pick {st['base_rate']:.0f}%"), (50.0, "50%")], yfmt=lambda v: f"{v:.0f}%", ymin=0.0, ymax=100.0,
@@ -361,11 +446,11 @@ def _event_page(rv, *, title: str | None = None, max_points: int = 900) -> str:
     perm_html = ""
     if rv.permutation is not None:
         pm = rv.permutation
-        perm_html = ('<h2>Is it luck?</h2><div class="card"><div class="wrap"><table class="t"><tr><th>Measure</th><th>Signal</th><th>Random picks, same number each day</th><th>p</th></tr>'
-                     f"<tr><td>Win rate</td><td>{pm['real_win_rate'] * 100:.1f}%</td><td>{pm['random_win_rate_mean'] * 100:.1f}% (95th {pm['random_win_rate_p95'] * 100:.1f}%)</td><td>{_pv(pm['p_win'])}</td></tr>"
-                     f"<tr><td>Mean trade</td><td>{pm['real_mean_bp']:+.0f} bp</td><td>{pm['random_mean_bp_mean']:+.0f} bp (95th {pm['random_mean_bp_p95']:+.0f})</td><td>{_pv(pm['p_mean'])}</td></tr></table></div>"
-                     f'<p class="note">{pm["n"]} random draws of the same number of securities on each day; p counts the draws at least as good as the signal, plus one. '
-                     "A test against zero cannot answer this: in a rising market almost any pick has a positive mean.</p></div>")
+        perm_html = ('<h2>Is it luck?</h2><div class="card"><div class="wrap"><table class="t"><tr><th>Measure</th><th>Signal</th><th>The signal moved in time</th><th>p</th></tr>'
+                     f"<tr><td>Win rate</td><td>{pm['real_win_rate'] * 100:.1f}%</td><td>{pm['null_win_rate_mean'] * 100:.1f}% (95th {pm['null_win_rate_p95'] * 100:.1f}%)</td><td>{_pv(pm['p_win'])}</td></tr>"
+                     f"<tr><td>Mean trade</td><td>{pm['real_mean_bp']:+.0f} bp</td><td>{pm['null_mean_bp_mean']:+.0f} bp (95th {pm['null_mean_bp_p95']:+.0f})</td><td>{_pv(pm['p_mean'])}</td></tr></table></div>"
+                     f'<p class="note">{pm["n"]} copies of the signal, each moved in time by a random amount: how often it fires, for how long and on which securities are kept, only the alignment with the returns is '
+                     "destroyed. p counts the copies at least as good as the signal, plus one. A test against zero cannot answer this: in a rising market almost any pick has a positive mean.</p></div>")
     port = ""
     if rv.portfolio is not None:
         pr = rv.portfolio
@@ -381,13 +466,13 @@ def _event_page(rv, *, title: str | None = None, max_points: int = 900) -> str:
         tk = _year_ticks(s_.index[0], s_.index[-1]) if (s_.index[-1] - s_.index[0]).days > 700 else None
         mk = rv.portfolio_market
         mt = rv.portfolio_mean
-        prow = (f"<tr><td>CAGR</td><td>{_pct(pm_['CAGR'])}</td></tr><tr><td>Sharpe</td><td>{_num(pm_['Sharpe'])}"
-                + (f" (Newey-West t of the mean {_num(mt['nw_t'])})" if mt else "") + f"</td></tr><tr><td>Max drawdown</td><td>{_pct(pm_['MDD'])}</td></tr>"
-                f"<tr><td>Volatility</td><td>{_pct(pm_['vol'])}</td></tr><tr><td>Turnover per bar</td><td>{_num(pm_['turnover_daily'], 3)}</td></tr>"
+        prow = (f"<tr><td>CAGR</td><td>{_pct(pm_.get('CAGR'))}</td></tr><tr><td>Sharpe</td><td>{_num(pm_.get('Sharpe'))}"
+                + (f" (Newey-West t of the mean {_num(mt['nw_t'])})" if mt else "") + f"</td></tr><tr><td>Max drawdown</td><td>{_pct(pm_.get('MDD'))}</td></tr>"
+                f"<tr><td>Volatility</td><td>{_pct(pm_.get('vol'))}</td></tr><tr><td>Turnover per bar</td><td>{_num(pm_.get('turnover_daily'), 3)}</td></tr>"
                 + (f"<tr><td>Excess CAGR against the benchmark</td><td>{_pct(mk['excess_cagr'])}</td></tr><tr><td>Months it beat the benchmark</td><td>{_pct(mk['hit_rate_month'], 0)}</td></tr>"
                    f"<tr><td>Up / down capture, beta</td><td>{_num(mk['up_capture'])} / {_num(mk['down_capture'])}, {_num(mk['beta'])}</td></tr>" if mk else ""))
         port = ("<h2>The same signal held as a portfolio</h2><div class=\"card\">"
-                + _chart("pf", f"Growth of 1: every fire gets an equal share of 1/{h} of the capital for {h} bars, cash otherwise", xs, sers, yfmt="num", xfmt=_date_fmt, height=230, max_points=max_points,
+                + _chart("pf", f"Growth of 1: each date's fires share 1/{rv.hold} of the capital for {rv.hold} bars, cash on dates with no fire", xs, sers, yfmt="num", xfmt=_date_fmt, height=230, max_points=max_points,
                          xticks=tk, xtickfmt=_year_fmt if tk else None, logy=wide_range([sr["y"] for sr in sers]))
                 + f'<div class="wrap"><table class="t">{prow}</table></div><p class="note">This puts an event signal on the same footing as a factor portfolio: a win rate says how often, '
                   "the curve says how much and how bumpy.</p></div>")
@@ -411,8 +496,8 @@ def _event_page(rv, *, title: str | None = None, max_points: int = 900) -> str:
     ttl = title or "Event signal review"
     sub = f"{res.spec.get('market', '')} · cost {rv.cost_bp:.0f} bp round trip · {len(ht)} horizon(s) tried"
     body = (f"{read}<h2>Figures</h2><div class=\"tiles\">{tiles}</div><h2>By holding period</h2>{htab}"
-            f"{perm_html}<h2>How much cost can it take?</h2><div class=\"card\">{cost_chart}<div class=\"wrap\"><table><tr><th>Round-trip cost</th><th>Win rate</th><th>Mean bp</th><th>Median bp</th></tr>{crow}</table></div>"
-            f"<p class=\"note\">{'The win rate stays above 50% up to ' + format(max(above), '.0f') + ' bp of the costs tried.' if above else 'The win rate is not above 50% at any of the costs tried.'}</p></div>"
+            f"{perm_html}<h2>How much cost can it take?</h2><div class=\"card\">{cost_chart}<div class=\"wrap\"><table><tr><th>Round-trip cost</th><th>Win rate</th><th>Random pick</th><th>Lift (points)</th><th>Mean bp</th><th>Median bp</th></tr>{crow}</table></div>"
+            f"<p class=\"note\">{'The win rate stays above a random pick on the same days up to ' + format(max(above), '.0f') + ' bp of the costs tried (a random pick also wins less as the cost rises).' if above else 'The win rate is not above a random pick on the same days at any of the costs tried.'}</p></div>"
             f"<h2>Year by year</h2><div class=\"card\">{ybar}<p class=\"note\">{n_up} of {len(yr)} years have a win rate above the random pick's {st['base_rate']:.0f}%. "
             f"Years with few trades have wide intervals (hover a bar).</p></div>{port}"
             f"{segs_html}{gates}<h2>What the signal picks</h2><div class=\"card wrap\"><table class=\"t\">{srow}</table></div>"

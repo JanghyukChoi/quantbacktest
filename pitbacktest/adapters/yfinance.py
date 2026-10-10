@@ -110,7 +110,7 @@ def load_panel(tickers: list[str], start: str, end: str, *,
                       "See docs/survivorship.md.", stacklevel=2)
     return Panel(close=close, eligible=eligible, open=open_, high=high, low=low,
                  volume=volume, mkt_cap=mkt_cap, chars=chars,
-                 market=market, entry_lag=entry_lag, periods_per_year=ppy)
+                 market=market, entry_lag=entry_lag, periods_per_year=ppy, meta={"return_basis": "total (auto_adjust includes dividends and splits)"})
 
 
 def _market_cap(yf, tickers: list[str], close: pd.DataFrame) -> pd.DataFrame | None:

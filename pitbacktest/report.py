@@ -27,11 +27,11 @@ _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 _CSS = """
 :root{color-scheme:light;--surface:#fcfcfb;--page:#f9f9f7;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;--ring:rgba(11,11,11,.10);
---s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--pos:#2a78d6;--neg:#e34948;--mid:#f0efec;--warn:#fab219;--crit:#d03b3b;--good:#006300}
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--pos:#2a78d6;--neg:#e34948;--mid:#f0efec;--warn:#fab219;--crit:#d03b3b;--good:#006300}
 @media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){color-scheme:dark;--surface:#1a1a19;--page:#0d0d0d;--ink:#fff;--ink2:#c3c2b7;--muted:#898781;
---grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70;--pos:#3987e5;--neg:#e66767;--mid:#383835;--good:#0ca30c}}
+--grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--pos:#3987e5;--neg:#e66767;--mid:#383835;--good:#0ca30c}}
 :root[data-theme="dark"]{color-scheme:dark;--surface:#1a1a19;--page:#0d0d0d;--ink:#fff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
---s1:#3987e5;--s2:#d95926;--s3:#199e70;--pos:#3987e5;--neg:#e66767;--mid:#383835;--good:#0ca30c}
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--pos:#3987e5;--neg:#e66767;--mid:#383835;--good:#0ca30c}
 *{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:980px;margin:0 auto;padding:24px 16px 56px}h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:32px 0 10px}
 .sub{color:var(--ink2);margin:0 0 18px;font-size:14px}.card{background:var(--surface);border:1px solid var(--ring);border-radius:10px;padding:14px 16px}
@@ -265,7 +265,7 @@ def _heat(monthly: pd.Series) -> str:
     return f'<div class="wrap"><table class="heat">{head}{"".join(rows)}</table></div>'
 
 
-def _year_table(s: pd.Series, ppy: int) -> str:
+def _year_table(s: pd.Series, ppy: int, bench: pd.Series | None = None) -> str:
     rows = []
     idx = naive_index(s.index)
     start = 1.0                                                          # the equity at the end of the year before: a loss on a year's first bar is part of its drawdown
@@ -273,9 +273,15 @@ def _year_table(s: pd.Series, ppy: int) -> str:
         eq = (1.0 + g).cumprod() * start
         sh = g.mean() / g.std() * math.sqrt(ppy) if len(g) > 2 and g.std() > 1e-12 else float("nan")
         worst = (eq / np.maximum(eq.cummax(), start) - 1).min()
-        rows.append(f"<tr><td>{y}</td><td>{_pct(eq.iloc[-1] / start - 1)}</td><td>{_pct(g.std() * math.sqrt(ppy))}</td><td>{_num(sh)}</td><td>{_pct(worst)}</td><td>{len(g)}</td></tr>")
+        ret = float(eq.iloc[-1] / start - 1)
+        extra = ""
+        if bench is not None:
+            bg = bench.reindex(g.index)
+            br = float((1.0 + bg.fillna(0.0)).prod() - 1.0)
+            extra = f"<td>{_pct(br)}</td><td>{_pct(ret - br)}</td>"
+        rows.append(f"<tr><td>{y}</td><td>{_pct(ret)}</td>{extra}<td>{_pct(g.std() * math.sqrt(ppy))}</td><td>{_num(sh)}</td><td>{_pct(worst)}</td><td>{len(g)}</td></tr>")
         start = float(eq.iloc[-1])
-    return ('<div class="wrap"><table><tr><th>Year</th><th>Return</th><th>Volatility</th><th>Sharpe</th><th>Worst drawdown</th><th>Bars</th></tr>'
+    return ('<div class="wrap"><table><tr><th>Year</th><th>Return</th>' + ("<th>Benchmark</th><th>Relative</th>" if bench is not None else "") + '<th>Volatility</th><th>Sharpe</th><th>Worst drawdown</th><th>Bars</th></tr>'
             + "".join(rows) + "</table></div>")
 
 
@@ -324,6 +330,9 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
         items.append(("bad", "Account wiped out", f"the account lost 100% or more on {m.get('ruin_date')}; the series is -100% on that bar and 0 afterwards. Read CAGR and drawdown, not Sharpe."))
     for n in getattr(res, "notes", []):
         items.append(("w", "Warning", n))
+    basis = res.spec.get("return_basis")
+    if isinstance(basis, str) and basis.startswith("price ("):
+        items.append(("w", "Price returns", f"{basis}: a stock's dividends are missing from these returns, which understates a dividend-paying book and hides the difference between stocks that pay and stocks that do not."))
     items.extend(extra_items)
     if ledger is not None and family is not None:
         try:
@@ -343,8 +352,10 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
     if ci is None:
         items.append(("w", "Sharpe interval", f"could not be computed ({ci_why}); this page cannot say how uncertain the Sharpe ratio is."))
     if ci is not None:
-        items.append(("w" if ci["lo"] <= 0 else "ok", "Sharpe interval", f"{_num(ci['sharpe'])}, 95% interval {_num(ci['lo'])} to {_num(ci['hi'])} "
-                      f"(stationary block bootstrap, {len(s):,} bars); {'it includes 0: no evidence of an edge from this sample alone.' if ci['lo'] <= 0 else 'it excludes 0.'}"))
+        _kind = "ok" if ci["lo"] > 0 else ("bad" if ci["hi"] < 0 else "w")
+        _txt = ("it excludes 0 (above it)." if ci["lo"] > 0 else ("it is entirely below 0: the strategy lost money beyond what chance explains." if ci["hi"] < 0
+                                                                else "it includes 0: no evidence of an edge from this sample alone."))
+        items.append((_kind, "Sharpe interval", f"{_num(ci['sharpe'])}, 95% interval {_num(ci['lo'])} to {_num(ci['hi'])} (stationary block bootstrap, {len(s):,} bars); {_txt}"))
     if ab is not None and _ok(ab.get("alpha_t")):
         t_a = ab["alpha_t"]
         verdict = ("the alpha is significantly negative: the strategy lost against the benchmark beyond what chance explains" if t_a <= -2.5
@@ -433,7 +444,7 @@ def report_html(res, *, title: str | None = None, ledger=None, family: str | Non
             f"<p class=\"sub\">{xfmt(xms[0])} to {xfmt(xms[-1])} · {len(s):,} bars · pitbacktest {__version__}</p>"
             f"{read}<h2>Figures</h2><div class=\"tiles\">{tiles}</div>"
             f"<h2>Curves</h2><div class=\"card\">{charts[0]}</div><div class=\"two\" style=\"margin-top:12px\"><div class=\"card\">{charts[1]}</div><div class=\"card\">{charts[2]}</div></div>"
-            f"{after_curves}<h2>Months and years</h2><div class=\"card\">{_heat(mon)}</div><div class=\"card\" style=\"margin-top:12px\">{_year_table(s, ppy)}</div>"
+            f"{after_curves}<h2>Months and years</h2><div class=\"card\">{_heat(mon)}</div><div class=\"card\" style=\"margin-top:12px\">{_year_table(s, ppy, None if res.benchmark_returns is None else res.benchmark_returns.copy().set_axis(naive_index(res.benchmark_returns.index)))}</div>"
             f"{after_months}<h2>Costs and exposure</h2>{costs}{cap}"
             f"<h2>How it was run</h2><div class=\"card\"><dl>{spec_rows}</dl><p class=\"foot\" style=\"margin-bottom:0\">{_esc(conv)}</p></div>"
             f"<p class=\"foot\">Self-contained page: no network access, no scripts beyond the hover tooltips.</p></main><script>{_JS}</script></body></html>")

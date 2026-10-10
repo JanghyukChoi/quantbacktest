@@ -112,6 +112,7 @@ def build_panel(store: ArchiveStore | None = None, *, symbols: list[str] | None 
               funding=sl(funding), delist_after=sl(delist_after))
     n = p.eligible.sum(axis=1)
     p.meta = {
+        "return_basis": "no dividends (perpetual futures); funding is charged separately",
         "symbols_in_archive": len(store.symbols()), "symbols_used": len(cols),
         "survivors_only": survivors_only, "delisted_in_panel": int(delist_after.values.any(axis=0).sum()),
         "eligible_median": float(n[n > 0].median()), "min_adv_usd": min_adv_usd, "min_age_days": min_age_days,

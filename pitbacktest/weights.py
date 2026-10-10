@@ -201,7 +201,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
         bret = pd.Series(br[:cut], index=panel.dates[:cut], name="benchmark")
     s = pd.Series(net[:cut], index=panel.dates[:cut])
     yr = s.groupby(s.index.year).apply(lambda g: float((1 + g).prod() - 1))
-    spec = {"kind": "weights", "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": ppy,
+    spec = {"kind": "weights", "return_basis": panel.meta.get("return_basis"), "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": ppy,
             "spread": "panel" if np.ndim(spread_bp) else f"{spread_bp}bp round trip",
             "buy_bp": _side_label(bb), "sell_bp": _side_label(sb), "borrow_bp": "panel" if b.ndim else float(b),
             "impact": None if impact is None else {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window,

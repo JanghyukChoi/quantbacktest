@@ -231,6 +231,7 @@ def build_tiingo_panel(store_dir, master: pd.DataFrame, tickers, *, start: str =
         meta["div_cash"] = pd.DataFrame(div).reindex(index=cal, columns=A.columns).astype("float32")   # dollars per share paid that day (raw prices)
     meta["suspect_returns_gt_10x"] = int((r.abs() > 10).sum().sum())
     meta["securities"] = int(A.shape[1])
+    meta["return_basis"] = "total (adjusted close includes dividends and splits)"
     meta["raw_close"] = R.astype("float32")                      # the real price level (dollars), for whole-share sizes; `close` is adjusted
     return Panel(close=A, eligible=elig, volume=dvol / A, market="US", entry_lag=entry_lag, periods_per_year=252,
                  delist_after=da, meta=meta, **extra)

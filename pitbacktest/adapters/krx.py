@@ -213,7 +213,7 @@ def build_krx_panel(store_dir, *, start=None, end=None, min_age_days: int = 60, 
               delist_after=da)
     n = ok.sum(axis=1)
     mk = mat("_mk").fillna(-1).astype("int8")                                # the market of each security on each day (-1: not listed)
-    p.meta = {"suspect_returns": suspect, "market_codes": {i: m for i, m in enumerate(market_names)}, "market_by_date": mk,
+    p.meta = {"return_basis": "price (adjusted for splits; dividends are not in the series)", "suspect_returns": suspect, "market_codes": {i: m for i, m in enumerate(market_names)}, "market_by_date": mk,
               "raw_close": close.astype("float32"),                  # the real price level (won), for whole-share sizes; `close` is back-adjusted
               "securities": int(close.shape[1]), "delisted_in_panel": int(da.values.any(axis=0).sum()),
               "eligible_median": float(n[n > 0].median()), "first_day": str(close.index[0].date()),

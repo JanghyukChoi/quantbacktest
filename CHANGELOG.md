@@ -17,6 +17,11 @@
   attribution, walk-forward, settings, deflated Sharpe, probability of backtest overfitting, costs) and writes a page; the event review leads with the win rate against a random pick, and
   can hold the signal as a portfolio (`event_weights`) to compare it with a factor. `pitbacktest.robustness` has the pieces: `market_relative`, `mean_tests`, `subperiods`,
   `walk_forward`, `parameter_plateau`, `factor_permutation`, `signal_permutation`, `bh_fdr`, `holm`, `style_factor_returns`, `decompose`, `attribution`.
+- **More of what an institution reads**: value at risk and expected shortfall (historical, and scaled to today's volatility), the maximum drawdown as one draw from a distribution,
+  the same figures before and after a frozen date, bull, bear, calm and stormy markets, positions and concentration, allocation against selection (Brinson) for a long-only book,
+  a benchmark you supply (moved onto the signal dates: `robustness.align_benchmark`), a year table with the benchmark, `q.compare` (up to six strategies side by side, factor or event),
+  `q.blend` (mix strategies by their holdings) and `q.strategy_correlation`. Panels now say whether returns are price or total (`meta["return_basis"]`; the KRX adapter's are price only and
+  the page says so).
 - The permutation of a factor is **before costs**: shuffling each date independently destroys the persistence of the ranking, so shuffled portfolios turn over far more, and with costs in
   the null a slow factor with no information at all beat it (p = 0.02). Found on real crypto data, where a losing reversal strategy came out "significant".
 

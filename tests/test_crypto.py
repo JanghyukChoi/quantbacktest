@@ -57,6 +57,7 @@ def test_survivorship_and_stale_tail_and_min_age():
         surv = build_panel(store, start="2021-03-01", min_adv_usd=5e6, min_age_days=60, survivors_only=True, live=live)
         assert set(DEAD) <= set(full.tickers) and not (set(DEAD) & set(surv.tickers))            # C1
         assert full.meta["delisted_in_panel"] == 3 and surv.meta["delisted_in_panel"] == 0
+        assert full.meta["return_basis"].startswith("no dividends")
         for s, last in DEAD.items():                                                             # C3
             lv = full.close[s].last_valid_index()
             assert lv == DAYS[last], (s, lv)                                                     # frozen tail removed

@@ -93,9 +93,16 @@ ev.report("review.html")
 | Against the market | excess CAGR, months beaten, up and down capture, beta, information ratio, worst relative fall | yes | as a portfolio |
 | What explains it | regression on the panel's own size, momentum, reversal, volatility, liquidity and market factors; the alpha left over | yes | |
 | Where did it come from | long against short, best and worst securities, concentration, thirds by size and liquidity, groups you supply, gross to net by cost | yes | win rate by liquidity, size, price level |
-| Does it hold | by year, by half, **walk-forward** of the choice of setting | yes | by year, with intervals |
+| Does it hold | by year, by half, **walk-forward** of the choice of setting, before and after a frozen date (`split_date`) | yes | by year, with intervals |
+| How bad can it get | value at risk and expected shortfall (historical and at today's volatility), tails, longest time under water, **the maximum drawdown as one draw** (resampled histories) | yes | |
+| In which markets | bull and bear months, bear market (benchmark 20 percent down), calm and stormy, and whether the sample contains a bear market at all | yes | |
+| What it held | positions, effective number, concentration, turnover, trades, implied holding period; allocation against selection by group for a long-only book (Brinson) | yes | |
 | Is the setting a spike | Sharpe over a grid, neighbours of the best, deflated Sharpe over the grid, probability of backtest overfitting | yes | by horizon |
 | Cost | Sharpe at several spreads; win rate at several costs | yes | yes |
+
+Your own index can be the benchmark (`benchmark_returns=`, put on the signal dates for you: a daily index compared one or two bars out of step gives a wrong beta and correlation).
+`q.compare({"a": r1, "b": r2, "event": ev}, "compare.html")` puts up to six results, factor or event, side by side (figures, growth, risk and return, correlation, year by year), and
+`q.blend(panel, parts, weights, spread_bp=...)` mixes their holdings (netting makes the blend cheaper than its parts; with zero costs it is exactly the weighted sum of their returns).
 
 Every building block is also a function in `pitbacktest.robustness` (`walk_forward`, `factor_permutation`, `signal_permutation`, `market_relative`, `decompose`, `attribution`, `bh_fdr`, `holm`, ...), each checked against a worked answer. A permutation destroys one thing only: it says whether the ranking or the selection carries information, not whether the strategy is tradable.
 
