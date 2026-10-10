@@ -28,6 +28,8 @@
 - Metamorphic tests (`tests/test_metamorphic.py`): invariances under reordering or renaming securities, monotone transforms of the factor, inert additions, price level, scaling, cost, and (the strongest) scrambling
   everything after a date leaves everything before it unchanged.
 
+- The author and the copyright holder in the package metadata and the licence are now "pitbacktest contributors" (earlier releases name a person).
+
 ### Found by two independent reviews of 0.3.0 and fixed before release
 - **Warnings are kept per call, not by swapping the global filters.** The first version of `result.notes` replaced the process-wide warning filters while an engine ran: two engine
   calls in two threads could swap each other's warnings, and leave the filters changed so that later warnings disappeared; `-W error` let the engine finish (and write a ledger
