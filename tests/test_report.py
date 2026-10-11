@@ -142,6 +142,20 @@ def test_alpha_sign_and_log_axis():
     print("RP6 a big negative alpha is not ticked as good; an equity curve that falls by more than 8x is drawn on a log axis with true values; a wiped-out curve stays linear  PASS")
 
 
+def test_small_percent_ticks():
+    """A drawdown axis that spans 1.6 percent has ticks every half percent; written with no decimals they read 0%, -0%, -1%."""
+    from pitbacktest.report import _chart
+    x = list(range(100))
+    y = np.linspace(0.0, -0.016, 100)
+    page = _chart("dd", "Drawdown", x, [{"name": "d", "y": y, "color": "var(--s1)", "fmt": "pct"}], yfmt="pct", xfmt=lambda v: str(int(v)))
+    labels = re.findall(r'text-anchor="end">([^<]*%)</text>', page)
+    assert len(labels) == len(set(labels)) and not any(l.startswith("-0%") for l in labels), labels
+    assert any("." in l for l in labels), labels
+    wide = _chart("dd", "Drawdown", x, [{"name": "d", "y": np.linspace(0.0, -0.4, 100), "color": "var(--s1)", "fmt": "pct"}], yfmt="pct", xfmt=lambda v: str(int(v)))
+    assert all("." not in l for l in re.findall(r'text-anchor="end">([^<]*%)</text>', wide))
+    print("RP7 percent ticks under one percent apart keep their decimals; wide axes stay whole numbers  PASS")
+
+
 if __name__ == "__main__":
     test_numbers_and_determinism()
     test_thinning_keeps_extremes()
@@ -149,4 +163,5 @@ if __name__ == "__main__":
     test_limits_on_the_page()
     test_shapes()
     test_alpha_sign_and_log_axis()
+    test_small_percent_ticks()
     print("report tests: all passed")

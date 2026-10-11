@@ -2,12 +2,94 @@
 
 [![CI](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml/badge.svg)](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml)
 
-The Python package is named `pitbacktest` (`import pitbacktest`); the repository is `quantbacktest`.
+**Is your backtest real, or luck?** `pitbacktest` runs a trading strategy through the tests an institution would ask for and writes one page (and one JSON file) that says
+what limits the number: survivorship, look-ahead, costs, how many variants you tried, and whether the edge is bigger than chance. US stocks, Korean stocks and crypto perpetuals.
+Python 3.10 to 3.14; the only requirements are `pandas` and `numpy`. It is not a strategy and ships no data. The Python package is named `pitbacktest`; the repository is `quantbacktest`.
+
+```bash
+pip install pitbacktest
+```
+
+Status: **alpha**. No human has reviewed it yet; read `docs/verification_status.md` for what has been checked and what has not.
+
+## See it work (two minutes, no data to download)
+
+A made-up market in which nothing can be predicted. We try 30 random "factors", keep the best, and ask the library whether it is real. That is what a hopeful researcher does,
+and it is the mistake the library exists to catch.
+
+```python
+import tempfile
+import numpy as np, pandas as pd
+import pitbacktest as q
+
+# A made-up market: 150 stocks, 1000 days, prices that are random walks. Nothing in it can be predicted.
+rng = np.random.default_rng(0)
+dates = pd.bdate_range("2019-01-01", periods=1000)
+names = [f"S{i:03d}" for i in range(150)]
+close = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0.0003, 0.015, (1000, 150)), axis=0)), index=dates, columns=names)
+volume = pd.DataFrame(rng.lognormal(11, 1, (1000, 150)), index=dates, columns=names)
+eligible = pd.DataFrame(True, index=dates, columns=names)
+eligible.iloc[:60] = False                                    # no trading until the first 60 days of history exist
+panel = q.Panel(close=close, eligible=eligible, volume=volume, mkt_cap=close * 1e7, market="DEMO")
+
+# Try 30 "factors" that are pure noise and keep the best one, which is what a hopeful researcher does.
+ledger = q.Ledger(tempfile.mkdtemp())                         # records every variant tried, so the count cannot be forgotten
+best = None
+for k in range(30):
+    factor = pd.DataFrame(rng.standard_normal(close.shape), index=dates, columns=names)
+    r = q.backtest_portfolio(panel, factor, long_q=0.2, short_q=0.2, hold=20, spread_bp=5,
+                             ledger=ledger, family="demo", name=f"noise{k}")
+    if best is None or r.metrics["Sharpe"] > best[0].metrics["Sharpe"]:
+        best = (r, factor)
+r, factor = best
+print(f"best of 30: Sharpe {r.metrics['Sharpe']:.2f}, CAGR {r.metrics['CAGR']:+.1%}, max drawdown {r.metrics['MDD']:.1%}")
+
+# Now ask whether it is real.
+rv = q.review_portfolio(panel, factor, long_q=0.2, short_q=0.2, hold=20, spread_bp=5, ledger=ledger, family="demo")
+print(f"95% interval of the Sharpe ratio: {rv.sharpe_ci['lo']:.2f} to {rv.sharpe_ci['hi']:.2f}")
+print(f"deflated Sharpe over {rv.deflated['trials']} trials: {rv.deflated['dsr']:.2f}   (a real edge needs about 0.95)")
+rv.report("review.html")                                      # the full page: open it in a browser
+```
+
+```text
+best of 30: Sharpe 0.76, CAGR +1.0%, max drawdown -1.6%
+95% interval of the Sharpe ratio: -0.25 to 1.73
+deflated Sharpe over 30 trials: 0.18   (a real edge needs about 0.95)
+```
+
+A Sharpe ratio of 0.76 after costs looks like something. The review says it is not: the interval includes zero, and a deflated Sharpe of 0.18 is an 18 percent probability that
+the strategy beats what the best of 30 random strategies would show by luck alone. The top of `review.html`:
+
+![The top of the review page: what limits these numbers, key figures and curves](https://raw.githubusercontent.com/JanghyukChoi/quantbacktest/main/docs/img/review_top.png)
+
+Note the first line of the box, which is a tick mark: the strategy beat 100 relabellings of itself (p = 0.01). That test does not know that you picked the best of 30, which is why the
+deflated Sharpe line, fed by the ledger, is the one to believe. The page goes on to show where the return came from, how it behaves in bull and bear months, how bad a drawdown can
+get (the maximum drawdown is one draw from a distribution, and the page shows the distribution), what it costs to trade, and what the strategy held.
+
+## For people who work with an AI assistant
+
+Every result is also data. `rv.to_json("review.json")` writes figures, their units, the settings of the run and the **warnings the run raised** (`rv.notes`) as plain JSON, with no NaN
+(a figure that could not be computed is `null`) and a `schema_version`. Errors say what to change. An assistant that can run Python (Claude Code, Codex, Cursor, a notebook)
+needs nothing but `pip install pitbacktest`. Two things make that safer:
+
+- **`AGENTS.md`** is one page for the assistant: the workflow to follow, in what order to report (what limits the number first, then how many variants were tried, then the figures)
+  and what never to claim. Point your assistant at it, or paste it into its instructions.
+- **`pitbacktest.recipes`** are named factors (`momentum`, `reversal`, `low_volatility`, `size`, `illiquidity`, `volume_shock`, `distance_to_high`) that are already checked for
+  look-ahead, so an assistant calls `recipes.recipe(panel, "reversal", lookback=5)` instead of writing a factor, which is where most look-ahead comes from. `recipes.describe()` lists them
+  with their parameters.
+
+Ask it, for example:
+
+> Read AGENTS.md of pitbacktest. Review the reversal factor on my price panel with `review_portfolio` and a ledger, then tell me, from `notes` and the JSON, what limits the result.
+
+This is not an MCP server yet. A chat window in a browser (claude.ai, ChatGPT) cannot reach your computer or your data, so use an assistant that runs on your machine, or upload a
+price file there and ask for the review in text.
+
+## Why it is different
 
 **A backtest toolkit that measures its own biases.** Most backtest libraries compute a return and leave you to wonder how much
 of it is survivorship, look-ahead, a flattering cost assumption, or luck from trying many variants. Here each of those is either a
-measured number or a refused input, for US stocks, Korean stocks and crypto perpetuals. Core dependencies are `pandas` and `numpy`.
-It is not a strategy and ships no data.
+measured number or a refused input.
 
 What is different:
 

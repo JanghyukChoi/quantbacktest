@@ -14,7 +14,7 @@ import argparse, ast, concurrent.futures as cf, os, random, shutil, subprocess, 
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SLOW = {"test_robustness.py", "test_metamorphic.py", "test_intraday.py"}
+SLOW = {"test_robustness.py", "test_metamorphic.py", "test_intraday.py", "test_readme.py"}
 CMP = {ast.Lt: ast.LtE, ast.LtE: ast.Lt, ast.Gt: ast.GtE, ast.GtE: ast.Gt, ast.Eq: ast.NotEq, ast.NotEq: ast.Eq}
 ARI = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mult}
 
@@ -70,7 +70,7 @@ def run_one(args):
     try:
         shutil.copytree(REPO / "pitbacktest", work / "pitbacktest", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(REPO / "tests", work / "tests", ignore=shutil.ignore_patterns("__pycache__"))
-        for extra in ("pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md"):
+        for extra in ("pyproject.toml", "README.md", "AGENTS.md", "LICENSE", "CHANGELOG.md"):
             if (REPO / extra).exists():
                 shutil.copy(REPO / extra, work / extra)
         for d in ("docs", ".github"):

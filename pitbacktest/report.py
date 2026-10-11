@@ -181,9 +181,11 @@ def _chart(cid: str, caption: str, x, series: list[dict], *, yfmt: str, xfmt, he
     px = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)          # noqa: E731
     py = lambda v: T + (H - T - B) * (1.0 - (v - lo) / (hi - lo))    # noqa: E731
     g = []
+    step = abs(yt[1] - yt[0]) if len(yt) > 1 else 0.0
+    pdec = 0 if step * 100 >= 0.999 else min(3, int(math.ceil(-math.log10(step * 100 - 1e-12)))) if step > 0 else 0           # a tick step under 1 percent needs decimals (-0.5% is not "-0%")
     for i_t, t in enumerate(yt):
         t0 = 0.0 if abs(t) < 1e-9 else t                                  # never write -0%
-        label = ylab[i_t] if ylab else (f"{t0 * 100:.0f}%" if yfmt == "pct" else (f"{t0:.2f}" if abs(t0) < 10 else _compact(t0)))
+        label = ylab[i_t] if ylab else (f"{t0 * 100:.{pdec}f}%" if yfmt == "pct" else (f"{t0:.2f}" if abs(t0) < 10 else _compact(t0)))
         g.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{py(t):.1f}" y2="{py(t):.1f}"/><text x="{L - 6}" y="{py(t) + 4:.1f}" text-anchor="end">{_esc(label)}</text>')
     for t in (xticks if xticks is not None else [x0 + (x1 - x0) * k / 5 for k in range(6)]):
         if x0 <= t <= x1:

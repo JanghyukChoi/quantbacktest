@@ -9,6 +9,7 @@ Review: one call that runs a strategy through the tests an institution would ask
     review_portfolio()   factor portfolio: luck (permutation, t-tests), market-relative, factor decomposition, walk-forward, settings, cost
     review_event()       event signal: win rate against a random pick, cost, years, permutation, the signal held as a portfolio
     robustness           the building blocks (walk_forward, factor_permutation, signal_permutation, market_relative, bh_fdr, ...)
+    recipes              named, causal factor definitions (momentum, reversal, low_volatility, size, illiquidity, volume_shock, distance_to_high) for people and assistants who would rather not write one
     compare()            up to six strategies side by side; blend() mixes their holdings; strategy_correlation() their return correlation
 
 Design principles
@@ -23,7 +24,7 @@ from .core.gates import GateConfig
 from .event import backtest_event
 from .portfolio import backtest_portfolio, assert_timing
 from .screen import screen
-from . import validation, analytics, execution, robustness
+from . import validation, analytics, execution, robustness, recipes
 from .ledger import Ledger
 from .weights import backtest_weights, capacity_curve, ImpactModel
 from .shorting import shortable_from_bans
@@ -32,4 +33,4 @@ from .compare import compare, blend, strategy_correlation
 from ._version import __version__
 
 __all__ = ["shortable_from_bans", "execution", "validation", "analytics", "Ledger", "backtest_weights", "capacity_curve", "ImpactModel", "Panel", "build_pit_eligible", "GateConfig", "screen",
-           "backtest_event", "backtest_portfolio", "assert_timing", "robustness", "review_portfolio", "review_event", "event_weights", "compare", "blend", "strategy_correlation"]
+           "backtest_event", "backtest_portfolio", "assert_timing", "robustness", "recipes", "review_portfolio", "review_event", "event_weights", "compare", "blend", "strategy_correlation"]

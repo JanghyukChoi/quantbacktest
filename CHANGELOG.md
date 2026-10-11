@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+- **Factor recipes.** `pitbacktest.recipes`: `recipe(panel, name, **params)` and `describe()` for seven named factors (`momentum`, `reversal`, `low_volatility`, `size`, `illiquidity`,
+  `volume_shock`, `distance_to_high`). Each uses only data up to its own row (`assert_causal` passes on all of them, and a look-ahead planted in one is caught), leaves a cell NaN where
+  the history is short, and points the same way: a higher score goes long. Meant for people and assistants who would rather not write a factor, which is where look-ahead enters.
+- **`AGENTS.md`**: the workflow, the order to report results in, and what never to claim, for an assistant that uses the library. Its example is run by the tests.
+- **README**: install and a two-minute runnable example at the top (thirty noise factors, keep the best, ask whether it is real), with its output and a picture of the review page. The example is
+  run by the tests and its printed numbers are compared with the ones shown.
+- **Fix: a win rate of exactly 0 or 1 now lies inside its own Wilson interval** (the upper end of the interval at a win rate of 1 was 0.9999999999999999). Found by the property tests.
+- **Fix: percent ticks on a narrow axis keep their decimals** (a drawdown axis of 1.6 percent read "0%, -0%, -1%").
+- **Verification.** Property-based tests (Hypothesis), a differential test against `empyrical`, and value-level tests written from two automatic mutation runs (`docs/automut.py`);
+  see `docs/verification_status.md` for the scores and what still survives.
+
 ## 0.3.0
 - **Results as JSON.** `result.to_dict()` and `result.to_json(path)` for `backtest_portfolio`, `backtest_weights`, `backtest_event` and `screen`: figures, the unit of each, the
   run's settings and warnings, as plain JSON with no NaN (a figure that could not be computed is `null`). Layout versioned (`schema_version`), described in `pitbacktest.export`.
