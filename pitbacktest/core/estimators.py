@@ -18,7 +18,11 @@ EPS = 1e-12
 
 
 def newey_west_t(series: np.ndarray, lag: int) -> tuple[float, float, float, int]:
-    """Newey-West corrected t for overlapping returns. Returns (mean, se, t, T)."""
+    """Newey-West corrected t for overlapping returns. Returns (mean, se, t, T).
+
+    The long-run variance of the demeaned series is gamma_0 + 2 x sum over l = 1..L of (1 - l/(lag + 1)) x gamma_l, with gamma_l = sum(x_t x_(t-l)) / T (divided by T, not by T - l; no
+    small-sample correction), and the standard error of the mean is sqrt(that / T). Missing and infinite values are dropped first. With fewer than 30 finite observations (NaN, NaN, NaN, T) is returned. A `lag` longer than the sample keeps its weights (1 - l/(lag + 1)) and simply has no terms beyond l = T - 1. A series with no
+    variation (a non-positive long-run variance) has a mean but no standard error: (mean, NaN, NaN, T)."""
     x = np.asarray(series, dtype=np.float64)
     x = x[np.isfinite(x)]
     T = len(x)

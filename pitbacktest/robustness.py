@@ -605,7 +605,7 @@ def risk_profile(net: pd.Series, *, periods_per_year: int = 252, ewma_lambda: fl
     """How bad the bad bars were and how long the bad stretches lasted. Returns are per bar; losses are negative numbers.
 
     var_95, var_99, cvar_95, cvar_99   historical value at risk (the return that 5 or 1 percent of bars fell below) and the mean return of the bars below it (expected shortfall)
-    var_95_now, var_99_now, vol_now    the same quantiles of the returns scaled to today's volatility (an exponentially weighted estimate, `ewma_lambda`; filtered historical
+    var_95_now, var_99_now, vol_now    the same quantiles of the returns scaled to today's volatility (an exponentially weighted estimate, `ewma_lambda`, started at the variance of the first 20 bars and updated with the squared return of the previous bar, so each bar's scale is known before it; `vol_now` is the estimate for the next bar, annualised; filtered historical
                                        simulation): after a calm stretch the plain historical figure understates the risk of the next bar, after a stormy one it overstates it
     var_95_normal                      what a normal distribution with the same mean and volatility gives, to show how much fatter the real tail is
     tail_ratio                         the 95th percentile of the returns over the absolute 5th percentile: above 1 the good tail is longer than the bad one

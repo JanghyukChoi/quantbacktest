@@ -120,6 +120,12 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
     cost_bp  round-trip trading cost. If per-security measured costs exist, use the spread panel on the portfolio side.
     delist_return  return assumed on the day after a security's last bar when it is flagged in panel.delist_after (None: carried at its last price).
 
+    Definitions. A trade is a firing on an eligible security with a measured forward return; its profit is that return minus `cost_bp`. `win_rate` is the share of trades with profit above zero.
+    `base_rate` is the same share among **all** eligible securities with a measured return on the day of each trade, also net of the cost, weighted by the day's number of trades, over days whose
+    pool has at least 20 names (a trade on a smaller-pool day counts in `win_rate` but not in the base). `lift_pp` is their difference. A horizon with fewer than 100 trades is dropped. The
+    daily excess return is, per day with at least one firing and a pool of at least max(5, min(30, half the median universe)) names, the mean forward return of the firing names minus that of the
+    pool; its t is Newey-West with lag max(horizon, 21), and `net_bp` is its mean in bp minus `cost_bp`.
+
     With the neutralisation test on (the default) the contribution after controls is re-measured with a **dummy regression**.
     An event signal is not a continuous factor, so it is read through a dummy coefficient and not through residuals.
     """

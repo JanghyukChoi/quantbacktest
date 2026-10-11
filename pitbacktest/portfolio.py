@@ -281,6 +281,10 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     family      name that groups runs of one research question in the ledger. name labels this trial (the same label with other settings is another trial).
     delist_return  assumed return on the day **after** the last real bar of a security flagged in panel.delist_after.
                 None means 0 (closed at the last price, which can be optimistic). For example -0.5 shows the sensitivity.
+
+    `metrics["turnover_daily"]` is the mean over bars of the **one-way** turnover: half of the sum, over both legs, of the absolute change in each security's weight (per unit of capital in
+    each leg), counted from the second bar on (the first bar, a build from cash, is not a trade) and averaged over the bars of the series (the first one counts as 0). The two legs are summed, so a
+    long-short book that replaces all of both legs in one day has a turnover of 2.
     """
     _check_portfolio_args(factor, long_q, short_q, hold, weighting, spread_bp, benchmark)
     fz = freeze_hits(panel, freeze_days)

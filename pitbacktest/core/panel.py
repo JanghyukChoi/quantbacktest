@@ -161,7 +161,8 @@ class Panel:
         A security flagged in `delist_after` is carried at its last price after its last bar (as cash), or at `last price x (1 + delist_return)`
         when `delist_return` is given, so a holding period that runs into a delisting keeps its result instead of dropping out. Without that
         the statistics of `screen` and `backtest_event` would leave out exactly the trades that ended in a delisting. A security that is only
-        missing for some days (a halt) still gives NaN when an end price is missing. Compare `analytics.forward_returns`, which compounds daily
+        missing for some days (a halt) still gives NaN when an end price is missing. The result is stored in single precision (float32, relative error about 6e-8: 1e-9 of a 1 percent return), far below
+        any statistical noise. Compare `analytics.forward_returns`, which compounds daily
         returns and treats a missing price as a return of 0."""
         lag = self.entry_lag
         px = self.close

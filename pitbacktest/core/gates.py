@@ -34,6 +34,11 @@ def fire_structure(fire: np.ndarray, dates: pd.DatetimeIndex,
 
     A factor that keeps picking the same large stocks for years is a size factor (a static basket), not a signal.
     The top-name share and the longest run of consecutive firing days catch it.
+
+    max_name_share   the most frequent name's number of firing days over **all** days of the period (not over the number of firings)
+    max_consecutive  the longest run of consecutive firing days of any of the 30 most frequent names
+    daily_turnover   the mean over pairs of consecutive days of 1 - |A and B| / |A or B|, A and B the sets of firing names; a pair in which either day has no firing is **skipped**
+                     (not counted as 0 and not as 1)
     """
     n = fire.sum(axis=1)
     act = n[n > 0]
@@ -88,7 +93,7 @@ def subperiod(values: np.ndarray, dates: pd.DatetimeIndex, lag: int = 21) -> dic
 
 
 def yearly(values: np.ndarray, dates: pd.DatetimeIndex, lag: int = 21) -> dict:
-    """Consistency across years."""
+    """Consistency across years: a year counts only with at least 40 bars; it is positive when its mean is above zero (a mean of exactly zero is not)."""
     values = np.asarray(values)
     if len(values) == 0:
         return {"by_year": {}, "positive": 0, "total": 0, "positive_ratio": np.nan}
@@ -110,7 +115,7 @@ def oos_holdout(values: np.ndarray, dates: pd.DatetimeIndex,
     """OOS holdout: set the last N months aside and test on them.
 
     With a small sample a low t is normal. To tell 'dead' from 'cannot be measured'
-    look at n_days as well.
+    look at n_days as well. The cut is the last date minus `months` calendar months; the cut date itself is in the in-sample part; a part with fewer than 30 bars is not measured (NaN).
     """
     values = np.asarray(values)
     if len(values) == 0:
@@ -135,7 +140,10 @@ def run_gates(daily_excess: np.ndarray, dates: pd.DatetimeIndex, *,
               t_stat: float, net_bp: float, rho: float,
               fire: np.ndarray | None = None, tickers: pd.Index | None = None,
               cfg: GateConfig | None = None, lag: int = 21) -> dict:
-    """Pass every gate in order and record where the candidate dropped out."""
+    """Pass every gate in order and record where the candidate dropped out.
+
+    G6 (firing structure) is evaluated only when both `fire` and `tickers` are given; without them there are five gates. Every gate that is evaluated is run (a later gate is not skipped because
+    an earlier one failed); `failed_at` names the first one that failed. A threshold of None for G1 falls back to `cfg.fallback_t`. An unknown figure (NaN) fails the gate that needs it."""
     cfg = cfg or GateConfig()
     thr = cfg.null_threshold if cfg.null_threshold is not None else cfg.fallback_t
     res = {"config": asdict(cfg), "threshold": thr}

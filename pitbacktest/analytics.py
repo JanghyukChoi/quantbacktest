@@ -44,7 +44,7 @@ def alpha_beta(returns: pd.Series, factors: pd.Series | pd.DataFrame, *, periods
     value are dropped; at least `min_obs` rows (and 3 per coefficient) must remain.
 
     `alpha_annual` is the per-period intercept times `periods_per_year` (arithmetic, not compounded).
-    `appraisal` is `alpha_annual` over the annualised residual volatility.
+    `appraisal` is `alpha_annual` over the annualised residual volatility, whose residual standard deviation divides by n minus the number of coefficients (intercept included).
     Net returns include costs and funding while a benchmark does not, so a small negative alpha is expected for a
     strategy with no edge.
     """
