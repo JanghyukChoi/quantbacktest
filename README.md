@@ -66,9 +66,27 @@ Note the first line of the box, which is a tick mark: the strategy beat 100 rela
 deflated Sharpe line, fed by the ledger, is the one to believe. The page goes on to show where the return came from, how it behaves in bull and bear months, how bad a drawdown can
 get (the maximum drawdown is one draw from a distribution, and the page shows the distribution), what it costs to trade, and what the strategy held.
 
+## Your own data
+
+The input is a table with one row per security and day. `panel_from_long` turns it into a `Panel` (the column names are arguments) and refuses data it cannot trust: duplicate rows, zero or negative closes,
+unsorted dates. A security whose last row is long before the end is flagged as delisted.
+
+```python
+from pitbacktest.adapters.long_format import panel_from_long
+
+d = pd.read_csv("prices.csv")                         # for example: Date, Symbol, Adj Close, Volume
+d["Date"] = pd.to_datetime(d["Date"])
+panel = panel_from_long(d, id_col="Symbol", date_col="Date", close_col="Adj Close", volume_col="Volume", market="US")
+print(panel.audit())                                  # extreme returns, truncation, survivorship, and the equal-weighted market: does the sample behave like the market it claims to be?
+```
+
+What the library cannot do for you: know that the securities in the table are the ones that existed on each date (it can flag a table with no delistings, not repair it), or that the prices are adjusted
+correctly. `docs/assumptions.md` lists what is taken as given.
+
 ## For people who work with an AI assistant
 
-Every result is also data. `rv.to_json("review.json")` writes figures, their units, the settings of the run and the **warnings the run raised** (`rv.notes`) as plain JSON, with no NaN
+Every result is also data. `rv.summary()` is the headline in one flat dictionary (what limits the numbers, the figures, the variants tried and the deflated Sharpe, and sentences that follow from them);
+`rv.to_json("review.json")` writes figures, their units, the settings of the run and the **warnings the run raised** (`rv.notes`) as plain JSON, with no NaN
 (a figure that could not be computed is `null`) and a `schema_version`. Errors say what to change. An assistant that can run Python (Claude Code, Codex, Cursor, a notebook)
 needs nothing but `pip install pitbacktest`. Two things make that safer:
 

@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from . import robustness as rb
-from .core.notes import warn
+from .core.notes import muted, warn
 from .export import jsonable
 
 _BACKTEST_KEYS = {"long_q", "short_q", "hold", "weighting", "spread_bp", "buy_bp", "sell_bp", "benchmark", "funding", "delist_return", "freeze_days", "freeze_return",
@@ -106,7 +106,67 @@ class PortfolioReview:
                          "deflated_sharpe": self.deflated, "pbo": self.pbo, "attribution": self.attribution, "risk": self.risk, "drawdown_distribution": self.drawdown_dist,
                          "regimes": None if self.regimes is None else {**self.regimes, "table": _tbl(self.regimes["table"])}, "holdings": self.holdings, "in_out_of_sample": self.split,
                          "brinson": self.brinson, "grid": _tbl(self.grid_table), "plateau": self.plateau, "walk_forward": wf, "cost_table": _tbl(self.cost_table), "delisting_stress": _tbl(self.delist_table),
-                         "notes": self.notes})
+                         "notes": self.notes, "summary": self.summary()})
+
+    def summary(self) -> dict:
+        """The headline of the review in one flat dictionary, in the order a reader should take it: `notes` (what limits the numbers), the figures, the Sharpe interval, the luck tests, the variants
+        tried and the deflated Sharpe (of the best trial and of the strategy reviewed), the market and style views, the delisting stress, and `reading`: plain sentences that follow from them.
+        Everything is in `to_dict()` too; this is where to start. Figures that could not be computed are `None`."""
+        m = self.result.metrics or {}
+        d, ci, pm, mt = self.deflated, self.sharpe_ci, self.permutation, self.mean
+        dec, rg = self.decomposition, self.regimes
+        var = None
+        if d:
+            var = {"trials": d.get("trials"), "source": d.get("source"), "best_name": d.get("best_name"), "best_sharpe": d.get("sharpe"), "best_deflated_sharpe": d.get("dsr"),
+                   "reviewed_sharpe": d.get("reference_sharpe"), "reviewed_deflated_sharpe": d.get("reference_dsr"), "luck_benchmark_sharpe": d.get("sharpe_luck_benchmark")}
+        reading = []
+        if ci and ci.get("lo") is not None and math.isfinite(ci["lo"]) and ci["lo"] <= 0 <= ci["hi"]:
+            reading.append(f"The Sharpe ratio's 95 percent interval ({ci['lo']:.2f} to {ci['hi']:.2f}) includes 0: this sample shows no evidence of an edge.")
+        if d:
+            rs = d.get("reference_sharpe", d.get("sharpe"))
+            if rs is not None and math.isfinite(rs) and rs <= 0:
+                reading.append("The strategy's Sharpe ratio is not positive: a deflated Sharpe has nothing to deflate, and its probability is not evidence of anything. No edge is shown.")
+            else:
+                dv = d.get("reference_dsr", d.get("dsr"))
+                if dv is not None and math.isfinite(dv):
+                    reading.append(f"Deflated Sharpe {dv:.2f} against {d.get('trials')} trials (about 0.95 or more is the usual bar).")
+        if pm and pm.get("p") is not None and math.isfinite(pm["p"]) and d and (d.get("trials") or 1) > 1:
+            reading.append("The permutation test does not know that you chose this strategy among several; the deflated Sharpe does.")
+        be = None
+        ct = self.cost_table
+        if ct is not None and len(ct) > 1:
+            xs_, ys_ = [float(x) for x in ct.index], [float(v) for v in ct["sharpe"]]
+            if all(math.isfinite(v) for v in ys_) and ys_[0] > 0 >= ys_[-1]:
+                for (x0, y0), (x1, y1) in zip(zip(xs_, ys_), zip(xs_[1:], ys_[1:])):
+                    if y0 > 0 >= y1:
+                        be = x0 + (x1 - x0) * y0 / (y0 - y1)
+                        break
+                if be is not None:
+                    reading.append(f"The Sharpe ratio is positive only below about {be:.0f} bp of round-trip spread; compare that with what this strategy would really pay (its turnover is {m.get('turnover_daily', float('nan')):.2f} a day).")
+            elif ys_[-1] > 0:
+                be = float("inf")
+        if pm and pm.get("real_sharpe") is not None:
+            reading.append("The permutation test compares Sharpe ratios before costs: a small p-value there says the factor beats shuffled copies of itself, not that the strategy pays after costs.")
+        if rg and rg.get("sample_has_bear") is False:
+            reading.append("The sample contains no bear market: nothing here says how the strategy behaves in one.")
+        if m.get("held_missing_price_days"):
+            reading.append(f"{m['held_missing_price_days']} position-days were held with no price and earned 0: check the data.")
+        out = {"notes": list(self.notes),
+               "figures": {"sharpe": m.get("Sharpe"), "cagr": m.get("CAGR"), "max_drawdown": m.get("MDD"), "volatility": m.get("vol"), "turnover_daily": m.get("turnover_daily"),
+                           "cost_annual_bp": m.get("cost_annual_bp"), "borrow_annual_bp": m.get("borrow_annual_bp"), "held_missing_price_days": m.get("held_missing_price_days"),
+                           "break_even_spread_bp": None if be is None or be == float("inf") else be},
+               "sharpe_interval_95": None if not ci else [ci.get("lo"), ci.get("hi")],
+               "luck": {"permutation_p": None if not pm else pm.get("p"), "permutation_gross_sharpe": None if not pm else pm.get("real_sharpe"), "newey_west_t": None if not mt else mt.get("nw_t"), "newey_west_p": None if not mt else mt.get("nw_p"),
+                        "sign_test_p": None if not mt else mt.get("sign_p")},
+               "variants": var,
+               "market": {"sample_has_bear": None if not rg else rg.get("sample_has_bear"), "excess_cagr": None if not self.market else self.market.get("excess_cagr"),
+                          "beta": None if not self.market else self.market.get("beta")},
+               "style": None if not dec else {"alpha_annual": dec.get("alpha_annual"), "alpha_t": dec.get("alpha_t"), "r2": dec.get("r2")},
+               "settings": None if not (self.plateau or self.pbo) else {"plateau_verdict": None if not self.plateau else self.plateau.get("verdict"), "pbo": None if not self.pbo else self.pbo.get("pbo")},
+               "walk_forward_efficiency": None if not self.walk_forward else self.walk_forward.get("efficiency"),
+               "delisting_stress": None if self.delist_table is None else jsonable(self.delist_table),
+               "reading": reading}
+        return jsonable(out)
 
     def to_json(self, path=None, indent: int | None = 2):
         """`to_dict()` as JSON text, or written to `path`."""
@@ -144,7 +204,8 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
     n_bootstrap         resampled histories for the maximum-drawdown distribution (0 skips it)
     spread_grid         round-trip spreads in bp for the cost table (skipped when `spread_bp` is a panel)
     ledger, family      record the reviewed run (and each grid setting) in a trial ledger and add its deflated Sharpe
-    extra_trials        variants you tried and did not record (see `Ledger.deflated_sharpe`): added to the trial count of the deflated Sharpe, from the grid and from the ledger alike
+    extra_trials        variants you tried and did not record (see `Ledger.deflated_sharpe`): added to the trial count of the deflated Sharpe, from the grid and from the ledger alike. Count anything whose
+                        result you looked at: another cleaning of the data, another universe, another formula, another horizon
     """
     from .portfolio import backtest_portfolio
     bad = set(backtest_kwargs) - _BACKTEST_KEYS
@@ -202,7 +263,8 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
             notes.append(f"Brinson attribution not computed: {e}")
     if style_factors or extra_factors is not None:
         try:
-            F = rb.style_factor_returns(panel) if style_factors else pd.DataFrame(index=s.index)
+            with muted():
+                F = rb.style_factor_returns(panel) if style_factors else pd.DataFrame(index=s.index)
             if extra_factors is not None:
                 F = pd.concat([F, extra_factors], axis=1)
             keep = [c for c in F.columns if F[c].reindex(s.index).notna().mean() >= 0.8]
@@ -215,19 +277,22 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
     if n_permutations:
         pk = {k: v for k, v in backtest_kwargs.items() if k not in ("benchmark",)}
         try:
-            out.permutation = rb.factor_permutation(panel, factor, n=n_permutations, seed=seed, **pk)
+            with muted():
+                out.permutation = rb.factor_permutation(panel, factor, n=n_permutations, seed=seed, **pk)
         except ValueError as e:
             notes.append(f"permutation test not computed: {e}")
     if spread_grid is not None and np.ndim(backtest_kwargs.get("spread_bp", 20.0)) == 0:
         rows = []
         for c in spread_grid:
-            r = backtest_portfolio(panel, factor, **{**backtest_kwargs, "spread_bp": float(c), "benchmark": None, "grid": False})
+            with muted():
+                r = backtest_portfolio(panel, factor, **{**backtest_kwargs, "spread_bp": float(c), "benchmark": None, "grid": False})
             rows.append({"spread_bp": float(c), "sharpe": r.metrics["Sharpe"], "cagr": r.metrics["CAGR"]})
         out.cost_table = pd.DataFrame(rows).set_index("spread_bp")
     if panel.delist_after is not None and bool(np.asarray(panel.delist_after.values).any()):
         rows = []
         for dr in (0.0, -0.3, -0.5, -1.0):
-            r = backtest_portfolio(panel, factor, **{**backtest_kwargs, "delist_return": dr, "benchmark": None, "grid": False})
+            with muted():
+                r = backtest_portfolio(panel, factor, **{**backtest_kwargs, "delist_return": dr, "benchmark": None, "grid": False})
             rows.append({"delist_return": dr, "sharpe": r.metrics["Sharpe"], "cagr": r.metrics["CAGR"], "delist_events_held": r.metrics["delist_events_held"]})
         out.delist_table = pd.DataFrame(rows).set_index("delist_return")
         ev_held = int(out.delist_table["delist_events_held"].iloc[0])
@@ -245,8 +310,9 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
             bt = {k: v for k, v in cfg.items() if k in _BACKTEST_KEYS}
             fp = {k: v for k, v in cfg.items() if k not in _BACKTEST_KEYS}
             label = ", ".join(f"{k}={v}" for k, v in cfg.items())
-            r = backtest_portfolio(panel, make_factor(panel, **fp), **{**backtest_kwargs, **bt, "benchmark": None, "grid": False}, ledger=ledger, family=(family or "review") + "-grid",
-                                   name=label)
+            with muted():
+                r = backtest_portfolio(panel, make_factor(panel, **fp), **{**backtest_kwargs, **bt, "benchmark": None, "grid": False}, ledger=ledger, family=(family or "review") + "-grid",
+                                       name=label)
             cols[label] = r.net_returns
             sharpes[tuple(cfg.values())] = r.metrics["Sharpe"]
         R = pd.DataFrame(cols)
@@ -274,7 +340,7 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
         from .validation import deflated_sharpe
         Rm = R.dropna().to_numpy()
         if Rm.shape[1] >= 2 and len(Rm) > 30:
-            out.deflated = deflated_sharpe(Rm, trials=Rm.shape[1] + int(extra_trials), periods_per_year=ppy)
+            out.deflated = deflated_sharpe(Rm, trials=Rm.shape[1] + int(extra_trials), periods_per_year=ppy, reference=s.to_numpy())
             out.deflated["best_name"] = str(R.columns[int(out.deflated["best"])])
             out.deflated["source"] = "grid"
             if Rm.shape[1] >= 4 and len(Rm) >= 16 * 8:                                    # CSCV needs enough bars per block to rank the settings
@@ -282,7 +348,7 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
                 out.pbo = pbo_cscv(Rm, periods_per_year=ppy, seed=seed)
     if ledger is not None and out.deflated is None:
         try:
-            out.deflated = {**ledger.deflated_sharpe(family or "review", periods_per_year=ppy, extra_trials=extra_trials), "source": "ledger"}
+            out.deflated = {**ledger.deflated_sharpe(family or "review", periods_per_year=ppy, extra_trials=extra_trials, reference=s.to_numpy()), "source": "ledger"}
         except Exception as e:                                                          # a ledger with one trial has nothing to deflate against
             notes.append(f"deflated Sharpe from the ledger not computed: {str(e)[:80]}")
     out.notes = list(res.notes) + notes
@@ -308,12 +374,36 @@ class EventReview:
     portfolio_mean: dict | None = None
     notes: list = field(default_factory=list)
 
+    def summary(self) -> dict:
+        """The headline of the event review in one flat dictionary: `notes`, the horizon and whether it was fixed in advance, the trade statistics, the day-level excess return, the luck test, the gates
+        and `reading`. Everything is in `to_dict()` too. Figures that could not be computed are `None`."""
+        ht = self.horizons_table
+        row = ht.loc[self.horizon] if ht is not None and self.horizon in ht.index else None
+        g = self.result.gates if hasattr(self.result, "gates") else {}
+        de, pm = self.daily_excess or {}, self.permutation
+        fixed = bool((self.result.spec or {}).get("horizon_fixed_in_advance"))
+        reading = []
+        if not fixed and ht is not None and len(ht) > 1:
+            reading.append(f"The horizon ({self.horizon} bars) was chosen as the best of {len(ht)} by its lift on this sample: the figures are optimistic. Fix it in advance with primary_horizon.")
+        if row is not None and math.isfinite(float(row["lift_pp"])):
+            reading.append(f"Win rate {float(row['win_rate']):.1f} percent against {float(row['base_rate']):.1f} percent for a random pick on the same days: lift {float(row['lift_pp']):+.2f} points.")
+        if g and not g.get("passed", True):
+            reading.append(f"It failed gate {g.get('failed_at')}.")
+        out = {"notes": list(self.notes), "horizon": int(self.horizon), "horizon_fixed_in_advance": fixed, "cost_bp": self.cost_bp,
+               "trades": None if row is None else {"n_trades": int(row["n_trades"]), "win_rate": float(row["win_rate"]), "base_rate": float(row["base_rate"]), "lift_pp": float(row["lift_pp"]),
+                                                   "mean_bp": float(row["mean_bp"]), "median_bp": float(row["median_bp"])},
+               "daily_excess": {k: de.get(k) for k in ("days", "mean_excess_bp", "t", "p")},
+               "luck": None if not pm else {"p_win": pm.get("p_win"), "p_mean": pm.get("p_mean"), "method": pm.get("method")},
+               "gates": {"passed": g.get("passed"), "failed_at": g.get("failed_at")} if g else None,
+               "longest_losing_streak": (self.streak or {}).get("longest_losing_streak"), "reading": reading}
+        return jsonable(out)
+
     def to_dict(self) -> dict:
         """The whole review as a JSON-ready dictionary: the engine's result, the horizons, the cost and year tables, the segments, the permutation and the portfolio view."""
         return jsonable({"schema": "pitbacktest/event-review", "schema_version": 1, "result": self.result.to_dict(), "horizon": self.horizon, "cost_bp": self.cost_bp,
                          "horizons": _tbl(self.horizons_table), "cost_table": _tbl(self.cost_table), "yearly": _tbl(self.yearly), "streak": self.streak,
                          "daily_excess": self.daily_excess, "segments": {k: _tbl(v) for k, v in self.segments.items()}, "permutation": self.permutation, "portfolio": None if self.portfolio is None else self.portfolio.to_dict("monthly"),
-                         "portfolio_market_relative": self.portfolio_market, "portfolio_mean_tests": self.portfolio_mean, "notes": self.notes})
+                         "portfolio_market_relative": self.portfolio_market, "summary": self.summary(), "portfolio_mean_tests": self.portfolio_mean, "notes": self.notes})
 
     def to_json(self, path=None, indent: int | None = 2):
         """`to_dict()` as JSON text, or written to `path`."""
@@ -435,7 +525,8 @@ def review_event(panel, signal: pd.DataFrame, *, horizons=(1, 5, 20), cost_bp: f
         try:
             rv.hold = int(hold or h)
             W = event_weights(panel, signal, rv.hold)
-            pr = backtest_weights(panel, W, spread_bp=float(cost_bp), benchmark="cap", check_universe=False)
+            with muted():
+                pr = backtest_weights(panel, W, spread_bp=float(cost_bp), benchmark="cap", check_universe=False)
             rv.portfolio = pr
             rv.portfolio_mean = rb.mean_tests(pr.net_returns, periods_per_year=panel.periods_per_year)
             if pr.benchmark_returns is not None:

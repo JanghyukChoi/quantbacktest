@@ -284,6 +284,9 @@ class Panel:
             - silent truncation   (data vanishes wholesale after some date)
             - adjusted-price mismatch (more extreme gaps than daily moves: the adj_open defect type)
             - universe jumps      (the population triples over time, for example)
+        and reports the equal-weighted market of the eligible universe (`market_worst_day`, `market_max_drawdown`, `market_annual_return`) and the 5th and 95th percentile of the securities' annualised volatility (`stock_volatility_p05`, `stock_volatility_p95`): compare them with what you know about the period. A
+        sample of several years whose market never fell more than a few percent may be synthetic, a calm stretch, or a survivors-only selection; real stocks differ in volatility by a factor of two or more between
+        the calm and the wild, and a universe whose volatilities are all alike (the 5th and 95th percentile within about 20 percent of each other) is more likely generated than observed.
         """
         out = {}
         n = self.eligible.sum(axis=1)
@@ -296,6 +299,17 @@ class Panel:
 
         r = self.ret1().where(self.eligible)
         out["ret_extreme_pct"] = float((r.abs() > 0.30).mean().mean() * 100)
+        # the equal-weighted return of the eligible universe: a look at whether the sample behaves like the market it claims to be (a real equity market of several years has a crash in it)
+        mkt = r.mean(axis=1).dropna()
+        if len(mkt) > 20:
+            eq_ = (1.0 + mkt).cumprod()
+            out["market_worst_day"] = float(mkt.min())
+            out["market_max_drawdown"] = float((eq_ / eq_.cummax() - 1.0).min())
+            out["market_annual_return"] = float(eq_.iloc[-1] ** (self.periods_per_year / len(mkt)) - 1.0)
+            sv = r.std() * np.sqrt(self.periods_per_year)                           # annualised volatility of each security
+            sv = sv[np.isfinite(sv) & (sv > 0)]
+            if len(sv) >= 10:
+                out["stock_volatility_p05"], out["stock_volatility_p95"] = float(np.percentile(sv, 5)), float(np.percentile(sv, 95))
         gap = None
         if self.open is not None:
             gap = (self.open / self.close.shift(1) - 1.0).where(self.eligible)

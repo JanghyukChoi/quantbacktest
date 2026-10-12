@@ -10,12 +10,25 @@ The list lives in a `ContextVar`, so two engine calls in two threads (or two asy
 an earlier version swapped the process-wide warning filters for the duration of the call and was not safe to run in parallel."""
 from __future__ import annotations
 
+import contextlib
 import functools
 import sys
 import warnings
 from contextvars import ContextVar
 
 _sink: ContextVar[list | None] = ContextVar("pitbacktest_notes", default=None)
+_mute: ContextVar[bool] = ContextVar("pitbacktest_mute", default=False)
+
+
+@contextlib.contextmanager
+def muted():
+    """Inside, `warn` still notes the text for the engine call that collects it but does not print it: a review runs the same engine dozens of times (cost grid, settings grid, shuffles) and the
+    same warning, already printed for the run that is being reviewed and kept in the review's notes, would otherwise scroll past once per run."""
+    token = _mute.set(True)
+    try:
+        yield
+    finally:
+        _mute.reset(token)
 
 
 def warn(message, category=UserWarning, stacklevel: int = 1) -> None:
@@ -23,6 +36,8 @@ def warn(message, category=UserWarning, stacklevel: int = 1) -> None:
     sink = _sink.get()
     if sink is not None and issubclass(category, UserWarning) and str(message) not in sink:
         sink.append(str(message))
+    if _mute.get():
+        return
     try:
         f = sys._getframe(stacklevel)
     except ValueError:

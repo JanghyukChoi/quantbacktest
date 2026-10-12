@@ -244,7 +244,60 @@ def test_documents_agree():
     print("RR9 the documents no longer say that the portfolio engine has no impact model  PASS")
 
 
+def test_review_experience():
+    from pitbacktest import validation as vl
+    p, f = _book(seed=4, n_days=420, n_stocks=30)
+    with tempfile.TemporaryDirectory(prefix="rr10-") as d:
+        led = q.Ledger(d)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rv = q.review_portfolio(p, f, long_q=0.2, short_q=0.2, hold=5, n_permutations=30, make_factor=lambda panel: f, grid={"hold": [1, 3, 5]}, ledger=led, family="x")
+        assert len(w) <= 3 and len({str(x.message) for x in w}) == len(w), [str(x.message)[:50] for x in w]           # the dozens of internal reruns do not repeat the warnings
+        assert any("Panel.shortable" in n for n in rv.notes)
+    dflt = rv.deflated
+    assert dflt["source"] == "grid" and abs(dflt["reference_sharpe"] - rv.result.metrics["Sharpe"]) < 1e-9 and 0.0 <= dflt["reference_dsr"] <= 1.0
+    # a reference series that is the best column gets the best column's deflated Sharpe
+    rng = np.random.default_rng(5)
+    R = rng.normal(0.0004, 0.01, (400, 6)); R[:, 2] += 0.001
+    base = vl.deflated_sharpe(R, periods_per_year=252)
+    ref = vl.deflated_sharpe(R, periods_per_year=252, reference=R[:, base["best"]])
+    assert abs(ref["reference_dsr"] - base["dsr"]) < 1e-12 and abs(ref["reference_sharpe"] - base["sharpe"]) < 1e-12 and "reference_dsr" not in base
+    weak = vl.deflated_sharpe(R, periods_per_year=252, reference=R[:, 0] - 0.002)
+    assert weak["reference_sharpe"] < 0 and weak["reference_dsr"] < 0.05
+    s = rv.summary()
+    assert set(s) == {"notes", "figures", "sharpe_interval_95", "luck", "variants", "market", "style", "settings", "walk_forward_efficiency", "delisting_stress", "reading"}
+    assert s["figures"]["sharpe"] == rv.result.metrics["Sharpe"] and s["variants"]["trials"] == 3 and rv.to_dict()["summary"] == s
+    if rv.result.metrics["Sharpe"] <= 0:
+        assert any("not positive" in r for r in s["reading"])
+    sig = pd.DataFrame(np.random.default_rng(1).random(p.close.shape) < 0.06, index=p.dates, columns=p.tickers) & p.eligible
+    ev = _quiet(lambda: q.review_event(p, sig, horizons=(1, 5), n_permutations=20, as_portfolio=False))
+    es = ev.summary()
+    assert es["horizon"] == ev.horizon and es["horizon_fixed_in_advance"] is False and es["trades"]["n_trades"] > 100 and any("chosen as the best of" in r or "best of 2" in r for r in es["reading"]) and ev.to_dict()["summary"] == es
+    ev2 = _quiet(lambda: q.review_event(p, sig, horizons=(1, 5), n_permutations=20, as_portfolio=False, primary_horizon=5))
+    assert ev2.summary()["horizon_fixed_in_advance"] is True and not any("best of" in r for r in ev2.summary()["reading"])
+    ct = rv.cost_table
+    if ct is not None and float(ct["sharpe"].iloc[0]) > 0 >= float(ct["sharpe"].iloc[-1]):
+        assert s["figures"]["break_even_spread_bp"] is not None and ct.index[0] < s["figures"]["break_even_spread_bp"] <= ct.index[-1]
+    assert any("before costs" in r for r in s["reading"]) and s["luck"]["permutation_gross_sharpe"] is not None
+    # the break-even spread by hand: a Sharpe of +1 at 0 bp falling linearly to -1 at 20 bp crosses zero at 10 bp
+    fake = dataclasses.replace(rv, cost_table=pd.DataFrame({"sharpe": [1.0, 0.5, -1.0], "cagr": [0.1, 0.05, -0.1]}, index=pd.Index([0.0, 10.0, 20.0], name="spread_bp")))
+    be = fake.summary()["figures"]["break_even_spread_bp"]
+    assert abs(be - (10.0 + 10.0 * 0.5 / 1.5)) < 1e-12, be
+    print("RR10 a review prints each warning once, deflates the reviewed strategy's own Sharpe next to the best trial's, and has a one-call summary  PASS")
+
+
+def test_audit_market():
+    p, _ = _book(seed=3, n_days=400, n_stocks=30)
+    a = p.audit()
+    mkt = p.close.pct_change().where(p.eligible).mean(axis=1).dropna()
+    eq = (1 + mkt).cumprod()
+    assert abs(a["market_worst_day"] - mkt.min()) < 1e-12 and abs(a["market_max_drawdown"] - (eq / eq.cummax() - 1).min()) < 1e-12
+    assert abs(a["market_annual_return"] - (eq.iloc[-1] ** (252 / len(mkt)) - 1)) < 1e-12
+    assert a["stock_volatility_p05"] < a["stock_volatility_p95"] and a["stock_volatility_p05"] > 0
+    print("RR11 the audit reports the equal-weighted market's worst day, deepest fall and yearly return  PASS")
+
+
 if __name__ == "__main__":
-    for fn in (test_horizon, test_ledger, test_borrow, test_cost_dates, test_missing_price, test_panel_and_dates, test_delisting_stress, test_screen_gate, test_documents_agree):
+    for fn in (test_horizon, test_ledger, test_borrow, test_cost_dates, test_missing_price, test_panel_and_dates, test_delisting_stress, test_screen_gate, test_documents_agree, test_review_experience, test_audit_market):
         fn()
     print("reviewer round 1 tests: all passed")

@@ -7,7 +7,8 @@ Required columns (names are configurable): a **permanent security id** (not the 
 Optional: volume, open/high/low, market cap, a point-in-time `in_universe` flag (for example S&P 500 membership on that
 date), a `delist_return` on the last row of a security, and a ticker column (only used to detect ticker reuse).
 
-Checks: no duplicate (id, date), positive closes, sorted dates. Delisting is detected as the last bar of a security that
+Checks: no duplicate (id, date), positive closes, sorted dates. A zero or negative close is a bad print: drop the row (the position-day then has no price and the engines say so) or carry
+the previous close for one day, and say which you did; the function refuses to guess. Delisting is detected as the last bar of a security that
 ended well before the panel end. If a delisting return is given it is compounded into the last close (the CRSP
 convention: the return on the last day is (1 + r_last) * (1 + r_delist) - 1), so the engine sees a real loss.
 """

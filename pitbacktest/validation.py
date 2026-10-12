@@ -30,10 +30,13 @@ def sharpe(R: np.ndarray, periods_per_year: int = 1) -> np.ndarray:
     return R.mean(axis=0) / R.std(axis=0, ddof=1) * math.sqrt(periods_per_year)
 
 
-def deflated_sharpe(R: np.ndarray, *, trials: int | None = None, periods_per_year: int = 1) -> dict:
+def deflated_sharpe(R: np.ndarray, *, trials: int | None = None, periods_per_year: int = 1, reference: np.ndarray | None = None) -> dict:
     """Probability that the best column's true Sharpe is above what the best of `trials` random strategies
     would show by luck. `trials` defaults to the number of columns; pass a larger number if you also tried
-    variants you did not keep in R (and say so honestly)."""
+    variants you did not keep in R (and say so honestly).
+
+    `reference` is one return series (for example the strategy being reviewed, which may not be the best column of R): its own Sharpe ratio is deflated against the same luck benchmark and the
+    result gains `reference_sharpe` and `reference_dsr`. The probability for a strategy whose Sharpe ratio is not positive is not an evidence of anything: read it as 'no edge'."""
     R = np.asarray(R, dtype=np.float64)
     T, n = R.shape
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -56,8 +59,20 @@ def deflated_sharpe(R: np.ndarray, *, trials: int | None = None, periods_per_yea
     denom = math.sqrt(max(1e-12, 1 - skew * sr + (kurt - 1) / 4 * sr * sr))
     dsr = _N.cdf((sr - sr0) * math.sqrt(T - 1) / denom)
     a = math.sqrt(periods_per_year)
-    return {"best": j, "sharpe": sr * a, "sharpe_luck_benchmark": sr0 * a, "trials": k, "skew": skew,
-            "kurtosis": kurt, "T": T, "dsr": float(dsr)}
+    out = {"best": j, "sharpe": sr * a, "sharpe_luck_benchmark": sr0 * a, "trials": k, "skew": skew,
+           "kurtosis": kurt, "T": T, "dsr": float(dsr)}
+    if reference is not None:
+        xr = np.asarray(reference, dtype=np.float64)
+        xr = xr[np.isfinite(xr)]
+        if len(xr) > 2 and xr.std(ddof=0) > 0:
+            zr = (xr - xr.mean()) / xr.std(ddof=0)
+            srr, sk_r, ku_r = float(xr.mean() / xr.std(ddof=1)), float((zr ** 3).mean()), float((zr ** 4).mean())
+            den_r = math.sqrt(max(1e-12, 1 - sk_r * srr + (ku_r - 1) / 4 * srr * srr))
+            out["reference_sharpe"] = srr * a
+            out["reference_dsr"] = float(_N.cdf((srr - sr0) * math.sqrt(len(xr) - 1) / den_r))
+        else:
+            out["reference_sharpe"], out["reference_dsr"] = float("nan"), float("nan")
+    return out
 
 
 def pbo_cscv(R: np.ndarray, *, blocks: int = 16, periods_per_year: int = 1, max_splits: int | None = None,
