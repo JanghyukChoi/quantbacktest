@@ -337,6 +337,11 @@ def _portfolio_parts(rv):
                         f'<p class="note">The Sharpe ratio stays above 0 up to {max(pos):.0f} bp of the spreads tried.</p></div>' if pos else
                         '<h2>How much cost can it take?</h2><div class="card wrap"><table><tr><th>Round-trip spread</th><th>Sharpe</th><th>CAGR</th></tr>' + rowsc +
                         '</table><p class="note">The Sharpe ratio is not above 0 at any of the spreads tried.</p></div>')
+    if getattr(rv, "delist_table", None) is not None:
+        dt = rv.delist_table
+        rowsd = "".join(f"<tr><td>{r_[0] * 100:.0f}%</td><td>{_num(r_[1])}</td><td>{_pct(r_[2])}</td><td>{int(r_[3])}</td></tr>" for r_ in dt.reset_index().itertuples(index=False))
+        settings.append('<h2>What if a delisting loses money?</h2><div class="card wrap"><table><tr><th>Return on a delisting</th><th>Sharpe</th><th>CAGR</th><th>Delistings held</th></tr>' + rowsd +
+                        '</table><p class="note">The panel flags delisted securities. Without a stated return a delisted position is closed at its last price (0%), which is the optimistic end.</p></div>')
     hold = []
     if rv.holdings is not None:
         h = rv.holdings

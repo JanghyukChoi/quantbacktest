@@ -7,6 +7,18 @@
 - **`AGENTS.md`**: the workflow, the order to report results in, and what never to claim, for an assistant that uses the library. Its example is run by the tests.
 - **README**: install and a two-minute runnable example at the top (thirty noise factors, keep the best, ask whether it is real), with its output and a picture of the review page. The example is
   run by the tests and its printed numbers are compared with the ones shown.
+- **Changes after a human read the specification** (see `docs/blind_review/` for the blind re-implementation that came first):
+  - `backtest_event(primary_horizon=...)` fixes the horizon before looking; without it the best-of-several choice is flagged as a parameter search. `ledger`, `family` and `name` record an event run;
+    `screen(ledger=...)` records every factor; `Ledger.deflated_sharpe(extra_trials=...)` and `review_portfolio(extra_trials=...)` count variants that were tried and not recorded.
+  - `backtest_portfolio(borrow_bp=...)`; an unknown (NaN) borrow fee on a held short now raises in both engines (it used to be read as 0); a long-short run without `Panel.shortable` says every
+    security was assumed borrowable.
+  - **Behaviour change:** `buy_bp`, `sell_bp` and `borrow_bp` that vary with the date are read on the execution day (signal date + `entry_lag`), not the signal date.
+  - A held position with no price to book is counted (`held_missing_price_days`) and warned about; a halt and a flagged delisting are not.
+  - `Panel`: `entry_lag=0` is flagged; the fingerprint covers dates and tickers (ledger configurations that include the data fingerprint change); results carry `pnl_dates`.
+  - `review_portfolio` shows the Sharpe ratio and CAGR if a delisting loses 0, 30, 50 or 100 percent (when the panel flags delistings).
+  - `GateConfig(min_neutral_survival=...)` adds an opt-in gate G7 on the neutralised portfolio to `screen`; the documentation says what `passed` means.
+  - Documentation: nine holes found by the blind re-implementation closed (turnover_daily, Newey-West floors, firing-set turnover, the 40-bar year, G6, `vol_now`, the residual divisor, the event base rate, single
+    precision); `docs/assumptions.md`; the claim that `backtest_portfolio` has no impact model removed.
 - **Fix: a win rate of exactly 0 or 1 now lies inside its own Wilson interval** (the upper end of the interval at a win rate of 1 was 0.9999999999999999). Found by the property tests.
 - **Fix: percent ticks on a narrow axis keep their decimals** (a drawdown axis of 1.6 percent read "0%, -0%, -1%").
 - **Verification.** Property-based tests (Hypothesis), a differential test against `empyrical`, and value-level tests written from two automatic mutation runs (`docs/automut.py`);

@@ -88,7 +88,7 @@ def _trade_stats(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
 
 
 def _daily_excess(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
-                  *, min_fire: int = 1, min_pool: int | None = None) -> np.ndarray:
+                  *, min_fire: int = 1, min_pool: int | None = None, return_index: bool = False):
     """Daily excess return of the firing group (gate input).
 
     A fixed min_pool throws away every date in a small universe (for example a 20-name test).
@@ -97,13 +97,14 @@ def _daily_excess(fire: np.ndarray, cum: np.ndarray, eligible: np.ndarray,
     if min_pool is None:
         med = float(np.median(eligible.sum(axis=1)))
         min_pool = int(max(5, min(30, med * 0.5)))
-    out = []
+    out, rows = [], []
     for i in range(cum.shape[0]):
         s = fire[i] & np.isfinite(cum[i])
         pool = eligible[i] & np.isfinite(cum[i])
         if s.sum() >= min_fire and pool.sum() >= min_pool:
             out.append(cum[i][s].mean() - cum[i][pool].mean())
-    return np.array(out)
+            rows.append(i)
+    return (np.array(out), np.array(rows, dtype=int)) if return_index else np.array(out)
 
 
 @keep_warnings
@@ -113,12 +114,18 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
                    neutralize_check: bool = True,
                    gate_config: GateConfig | None = None,
                    null_threshold: float | None = None,
-                   delist_return: float | None = None) -> EventResult:
+                   delist_return: float | None = None, primary_horizon: int | None = None,
+                   ledger=None, family: str = "event", name: str | None = None) -> EventResult:
     """Event-signal test.
 
     signal   bool or 0/1 matrix (date x ticker). True = fires that day.
     cost_bp  round-trip trading cost. If per-security measured costs exist, use the spread panel on the portfolio side.
     delist_return  return assumed on the day after a security's last bar when it is flagged in panel.delist_after (None: carried at its last price).
+
+    primary_horizon  the one horizon to judge, **fixed before looking**. Without it the horizon with the largest lift among `horizons` is chosen on the same sample and its t, net figure and
+                     gates decide the verdict, which is a parameter search: the more horizons, the more optimistic (a warning says so). With it, that horizon is used whatever its lift; the other horizons
+                     are still reported. It must be one of `horizons` and must have enough trades.
+    ledger, family, name  record the run (its day-level excess return and its settings) in a `Ledger`, so that it counts as a trial in the deflated Sharpe of the family, like a portfolio run.
 
     Definitions. A trade is a firing on an eligible security with a measured forward return; its profit is that return minus `cost_bp`. `win_rate` is the share of trades with profit above zero.
     `base_rate` is the same share among **all** eligible securities with a measured return on the day of each trade, also net of the cost, weighted by the day's number of trades, over days whose
@@ -156,9 +163,19 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
         raise ValueError(
             "No horizon can be tested. Either the signal fires too rarely (fewer than 100 events) or "
             "too few securities are eligible. Check signal, eligible and horizons.")
-    # representative horizon = where the lift is largest
-    best_h = max(per_h, key=lambda h: per_h[h].get("lift_pp", -99))
-    de = _daily_excess(fire, cums[best_h], ev)
+    if primary_horizon is not None:
+        if isinstance(primary_horizon, bool) or primary_horizon not in horizons:
+            raise ValueError(f"primary_horizon={primary_horizon!r} must be one of horizons {tuple(horizons)}")
+        if primary_horizon not in per_h:
+            raise ValueError(f"primary_horizon={primary_horizon} has too few trades to be tested (fewer than 100): the signal fires too rarely at that horizon")
+        best_h = int(primary_horizon)
+    else:
+        # representative horizon = where the lift is largest: a choice made on the same sample
+        best_h = max(per_h, key=lambda h: per_h[h].get("lift_pp", -99))
+        if len(per_h) > 1:
+            warn(f"the horizon ({best_h} bars) was chosen as the best of {len(per_h)} horizons by its lift on the same sample, and its t and gates decide the verdict: this is a parameter search and the figure is "
+                 f"optimistic. Fix the horizon in advance with primary_horizon= to test one.", stacklevel=2)
+    de, de_rows = _daily_excess(fire, cums[best_h], ev, return_index=True)
     if len(de) < 100:
         warn(
             f"Only {len(de)} days of daily excess return, so the gates cannot be trusted. "
@@ -178,8 +195,13 @@ def backtest_event(panel: Panel, signal: pd.DataFrame, *,
     if neutralize_check:
         neu = _dummy_neutralized(panel, fire, cums, horizons)
 
+    if ledger is not None:
+        from .ledger import array_fingerprint
+        ledger.record(family, name or "event", pd.Series(de, index=panel.dates[de_rows]), {
+            "kind": "event", "horizons": list(horizons), "primary_horizon": primary_horizon, "best_horizon": int(best_h), "cost_bp": float(cost_bp), "delist_return": delist_return,
+            "signal": array_fingerprint(fire), "data": panel.fingerprint()})
     return EventResult(
-        spec={"horizons": list(horizons), "cost_bp": cost_bp, "entry_lag": panel.entry_lag,
+        spec={"horizons": list(horizons), "cost_bp": cost_bp, "entry_lag": panel.entry_lag, "horizon_fixed_in_advance": primary_horizon is not None,
               "market": panel.market, "best_horizon": best_h,
               "decile": dec},
         per_horizon=per_h, gates=gates, structure=struct,

@@ -475,6 +475,8 @@ python tests/test_analytics.py      # alpha/beta, IC, bootstrap: against statsmo
 - No bundled data. The yfinance adapter is not point-in-time; the Binance archive and KRX paths are. US stocks need data you bring.
 - Fundamentals (`chars`) must be supplied by the user for the controls to be complete; without them it warns.
 - Everything is in English except the Korean security-name patterns and the quota message the KRX adapter has to match.
+- A **research** portfolio simulator, not an execution simulator: it holds target weights, not shares and cash, and brings drifted weights back to target for free; read turnover, cost and capacity
+  as estimates. Long-term Korean results need dividends, which the price series lacks. `docs/assumptions.md` lists the assumptions that can change a result.
 - For research and education. Nothing here is investment advice.
 
 ## License

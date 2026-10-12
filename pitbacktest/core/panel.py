@@ -102,6 +102,9 @@ class Panel:
             if v is not None:
                 setattr(self, k, v.reindex(index=self.close.index, columns=self.close.columns).fillna(False).astype(bool))
         self.validate()
+        if self.entry_lag == 0:
+            self._note("entry_lag=0: a signal fixed at a close is traded at that same close. That is possible only when the signal can be computed and the order filled before the close (a market-on-close order "
+                       "on a signal built from the day's last print); for anything else it is look-ahead. The usual choice is entry_lag=1.")
 
     def _note(self, message: str) -> None:
         """Warn, and keep the text in `meta["construction_notes"]` so that a result run on this panel can carry it."""
@@ -178,7 +181,7 @@ class Panel:
     def fingerprint(self) -> str:
         """Short hash of the numbers this panel holds (every matrix that is present, including volume and market cap, which
         the impact model and the size controls read), used by the trial ledger to tell whether two runs saw the same data.
-        The date index and the ticker names are not hashed: the same values in the same shape give the same fingerprint."""
+        The dates and the ticker names are hashed too: the same numbers under other dates or in another order of securities are another dataset."""
         import hashlib
         h = hashlib.sha256()
         mats = [(n, getattr(self, n)) for n in ("close", "eligible", "open", "high", "low", "volume", "mkt_cap", "funding", "delist_after", "shortable", "can_buy", "can_sell")]
@@ -187,6 +190,9 @@ class Panel:
             if v is not None:
                 a = np.ascontiguousarray(v.to_numpy(dtype=np.float32))
                 h.update(name.encode() + repr(a.shape).encode() + a.tobytes())
+        idx = self.close.index
+        h.update(b"index" + (np.asarray(idx.asi8).tobytes() if isinstance(idx, pd.DatetimeIndex) else repr(list(idx)).encode()))
+        h.update(b"tickers" + "\x1f".join(map(str, self.close.columns)).encode())
         h.update(f"{self.entry_lag}|{self.periods_per_year}|{self.market}".encode())
         return h.hexdigest()[:16]
 

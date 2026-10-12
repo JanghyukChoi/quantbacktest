@@ -26,6 +26,7 @@ class GateConfig:
     min_yearly_positive: float = 0.6      # share of years that are positive
     max_single_name_share: float = 0.5    # firing share of the most frequent name (static basket)
     min_turnover: float = 0.05            # lower bound of daily turnover
+    min_neutral_survival: float | None = None   # `screen` only: share (percent) of the raw excess return that must remain after neutralising against the controls; None = no such gate
 
 
 def fire_structure(fire: np.ndarray, dates: pd.DatetimeIndex,

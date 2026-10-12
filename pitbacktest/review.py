@@ -87,6 +87,7 @@ class PortfolioReview:
     plateau: dict | None = None
     walk_forward: dict | None = None
     cost_table: pd.DataFrame | None = None          # Sharpe and CAGR at several spreads
+    delist_table: pd.DataFrame | None = None        # Sharpe and CAGR if a delisting loses 0, 30, 50 or 100 percent (only when the panel flags delistings)
     attribution: dict | None = None                 # where the return came from (see `robustness.attribution`)
     risk: dict | None = None                        # VaR, CVaR, tails, drawdown length (`robustness.risk_profile`)
     drawdown_dist: dict | None = None               # the maximum drawdown as one draw (`robustness.drawdown_distribution`)
@@ -104,7 +105,7 @@ class PortfolioReview:
                          "subperiods": self.subperiods, "market_relative": self.market, "decomposition": self.decomposition, "permutation": perm, "sharpe_ci": self.sharpe_ci,
                          "deflated_sharpe": self.deflated, "pbo": self.pbo, "attribution": self.attribution, "risk": self.risk, "drawdown_distribution": self.drawdown_dist,
                          "regimes": None if self.regimes is None else {**self.regimes, "table": _tbl(self.regimes["table"])}, "holdings": self.holdings, "in_out_of_sample": self.split,
-                         "brinson": self.brinson, "grid": _tbl(self.grid_table), "plateau": self.plateau, "walk_forward": wf, "cost_table": _tbl(self.cost_table),
+                         "brinson": self.brinson, "grid": _tbl(self.grid_table), "plateau": self.plateau, "walk_forward": wf, "cost_table": _tbl(self.cost_table), "delisting_stress": _tbl(self.delist_table),
                          "notes": self.notes})
 
     def to_json(self, path=None, indent: int | None = 2):
@@ -122,7 +123,7 @@ class PortfolioReview:
 def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dict | None = None, walk_forward: dict | None = None, n_permutations: int = 100,
                      style_factors: bool = True, extra_factors: pd.DataFrame | None = None, groups: pd.Series | None = None, benchmark_returns: pd.Series | None = None,
                      split_date=None, n_bootstrap: int = 1000, spread_grid=(0.0, 5.0, 10.0, 20.0, 40.0), ledger=None,
-                     family: str | None = None,
+                     family: str | None = None, extra_trials: int = 0,
                      name: str | None = None, seed: int = 0, **backtest_kwargs) -> PortfolioReview:
     """Run a factor portfolio and every test of the list at the top of this module.
 
@@ -143,6 +144,7 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
     n_bootstrap         resampled histories for the maximum-drawdown distribution (0 skips it)
     spread_grid         round-trip spreads in bp for the cost table (skipped when `spread_bp` is a panel)
     ledger, family      record the reviewed run (and each grid setting) in a trial ledger and add its deflated Sharpe
+    extra_trials        variants you tried and did not record (see `Ledger.deflated_sharpe`): added to the trial count of the deflated Sharpe, from the grid and from the ledger alike
     """
     from .portfolio import backtest_portfolio
     bad = set(backtest_kwargs) - _BACKTEST_KEYS
@@ -222,6 +224,19 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
             r = backtest_portfolio(panel, factor, **{**backtest_kwargs, "spread_bp": float(c), "benchmark": None, "grid": False})
             rows.append({"spread_bp": float(c), "sharpe": r.metrics["Sharpe"], "cagr": r.metrics["CAGR"]})
         out.cost_table = pd.DataFrame(rows).set_index("spread_bp")
+    if panel.delist_after is not None and bool(np.asarray(panel.delist_after.values).any()):
+        rows = []
+        for dr in (0.0, -0.3, -0.5, -1.0):
+            r = backtest_portfolio(panel, factor, **{**backtest_kwargs, "delist_return": dr, "benchmark": None, "grid": False})
+            rows.append({"delist_return": dr, "sharpe": r.metrics["Sharpe"], "cagr": r.metrics["CAGR"], "delist_events_held": r.metrics["delist_events_held"]})
+        out.delist_table = pd.DataFrame(rows).set_index("delist_return")
+        ev_held = int(out.delist_table["delist_events_held"].iloc[0])
+        if ev_held == 0:
+            notes.append("delisting stress: no held position was delisted in this run, so the assumed loss on a delisting changes nothing here")
+        else:
+            s0, s50 = float(out.delist_table["sharpe"].loc[0.0]), float(out.delist_table["sharpe"].loc[-0.5])
+            line = f"delisting stress: {ev_held} held positions were delisted; the Sharpe ratio is {s0:.2f} if a delisting loses nothing and {s50:.2f} if it loses 50 percent"
+            notes.append(line + ("; the verdict depends on what a delisting costs" if (math.isfinite(s0) and math.isfinite(s50) and (s50 < 0.5 * s0 or s50 < 0 <= s0)) else ""))
     if grid is not None:
         grid = {k: _ordered(v) for k, v in grid.items()}
         cfgs = _grid_configs(grid)
@@ -259,7 +274,7 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
         from .validation import deflated_sharpe
         Rm = R.dropna().to_numpy()
         if Rm.shape[1] >= 2 and len(Rm) > 30:
-            out.deflated = deflated_sharpe(Rm, trials=Rm.shape[1], periods_per_year=ppy)
+            out.deflated = deflated_sharpe(Rm, trials=Rm.shape[1] + int(extra_trials), periods_per_year=ppy)
             out.deflated["best_name"] = str(R.columns[int(out.deflated["best"])])
             out.deflated["source"] = "grid"
             if Rm.shape[1] >= 4 and len(Rm) >= 16 * 8:                                    # CSCV needs enough bars per block to rank the settings
@@ -267,7 +282,7 @@ def review_portfolio(panel, factor: pd.DataFrame, *, make_factor=None, grid: dic
                 out.pbo = pbo_cscv(Rm, periods_per_year=ppy, seed=seed)
     if ledger is not None and out.deflated is None:
         try:
-            out.deflated = {**ledger.deflated_sharpe(family or "review", periods_per_year=ppy), "source": "ledger"}
+            out.deflated = {**ledger.deflated_sharpe(family or "review", periods_per_year=ppy, extra_trials=extra_trials), "source": "ledger"}
         except Exception as e:                                                          # a ledger with one trial has nothing to deflate against
             notes.append(f"deflated Sharpe from the ledger not computed: {str(e)[:80]}")
     out.notes = list(res.notes) + notes
@@ -349,8 +364,6 @@ def review_event(panel, signal: pd.DataFrame, *, horizons=(1, 5, 20), cost_bp: f
     res = backtest_event(panel, signal, horizons=horizons, cost_bp=cost_bp, **event_kwargs)
     h = int(res.spec["best_horizon"])
     notes = list(res.notes)
-    if len(tuple(horizons)) > 1:
-        notes.append(f"the best of {len(tuple(horizons))} horizons ({h} bars) was chosen by its lift: a result picked from several is optimistic")
     rows = []
     for hh, st in sorted(res.per_horizon.items()):
         if st:

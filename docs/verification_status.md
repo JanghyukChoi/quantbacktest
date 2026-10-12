@@ -38,6 +38,16 @@ and was treated as one security; false returns of thousands of percent when a co
 - **The walk-forward runs on a matrix of whole-sample returns** of each setting, which is exact because a setting's signal uses only the past; it does not re-estimate anything inside a fold.
 - **Brinson attribution is arithmetic and gross of costs**, for long-only books against a market-capitalisation or equal-weighted benchmark; it does not link over time geometrically.
 
+- **A research portfolio simulator, not an execution simulator.** The engines hold target weights and charge cost on the change of the target; they do not carry shares and cash. A position that
+  drifts with prices between rebalances is brought back at no charge (measured above). Read turnover, cost and capacity as a research estimate; an implementation backtest needs share and
+  NAV accounting, which the library does not have.
+- **Tranches start empty.** With `hold = h` the first `h` bars ramp the exposure up by 1/h a day (the book is built from nothing, as if no earlier tranche existed) and the first build is not charged. Over a
+  long sample the effect is small; for a short one, start the measurement after `h` bars.
+- **Borrow cost is charged on the short leg.** The two legs are separate sleeves (as for the spread), so a security that is long in one tranche and short in another pays on its short side. An unknown
+  fee on a held short raises; with no `Panel.shortable` every security is assumed borrowable and the result says so.
+- **Korean dividends** are the largest known gap for value, dividend, quality and low-volatility factors over long periods: the KRX series is a price series, a long collects a dividend the backtest
+  does not credit and a short owes one it does not charge. Total-return accounting needs a dividend data source the library does not have.
+
 ## Status by part
 
 | Part | Evidence | Status |
@@ -61,16 +71,15 @@ and was treated as one security; false returns of thousands of percent when a co
 
 1. **No human review and no outside users.** Every review so far was done by AI agents; they can share blind spots with the author.
 2. **Korean dividends are not in the prices**; Korean price limits (30 percent assumed), transaction-tax schedule and short-selling ban calendar are not shipped and must be supplied.
-3. **`backtest_portfolio` has no impact model** (`backtest_weights` does).
-4. **Suspended names:** the markdown is a scenario, not a measurement, and it is asymmetric (gains on a short frozen in a suspended name are not credited, but its gains before the suspension are kept).
+3. **Suspended names:** the markdown is a scenario, not a measurement, and it is asymmetric (gains on a short frozen in a suspended name are not credited, but its gains before the suspension are kept).
    A stuck position frees no capital unless `cap_gross` is used, and then only by scaling the free names.
-5. **Statistics:** heavy tails, regime changes and strongly correlated sectors were not tested against the shuffled null; the null is one factor family at one cost level.
-6. **Impact coefficient Y** is not calibrated against real executions, only bracketed by the visible book (the rise of Y with size in that note is built in by the interpolation).
-7. **The US free sample is small and has almost no bankruptcies.** The path with open, high, low and dividends (`fetch_symbols(full=True)`) passes on the 465 tickers with data;
+4. **Statistics:** heavy tails, regime changes and strongly correlated sectors were not tested against the shuffled null; the null is one factor family at one cost level.
+5. **Impact coefficient Y** is not calibrated against real executions, only bracketed by the visible book (the rise of Y with size in that note is built in by the interpolation).
+6. **The US free sample is small and has almost no bankruptcies.** The path with open, high, low and dividends (`fetch_symbols(full=True)`) passes on the 465 tickers with data;
    a result on a different or larger sample is not covered. One ticker (an expired warrant) returned nothing and is recorded as such.
-8. **Order book, queues, partial fills, liquidation, margin, borrow availability and per-name borrow fees** are not simulated.
-9. **Survivorship:** the US free data cannot show bankruptcies; any US result is a lower bound on survivorship bias. Korean data are survivorship-free; Binance keeps delisted contracts.
-10. **Operating system:** Linux only.
+7. **Order book, queues, partial fills, liquidation, margin, borrow availability and per-name borrow fees** are not simulated.
+8. **Survivorship:** the US free data cannot show bankruptcies; any US result is a lower bound on survivorship bias. Korean data are survivorship-free; Binance keeps delisted contracts.
+9. **Operating system:** Linux only.
 
 ## If you review
 

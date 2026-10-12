@@ -119,10 +119,16 @@ class Ledger:
             raise ValueError("fewer than 30 dates shared by all trials; record trials on the same sample")
         return df.to_numpy(), list(df.columns)
 
-    def deflated_sharpe(self, family: str, *, periods_per_year: int = 252) -> dict:
-        """Deflated Sharpe of the best trial in the family, with the trial count taken from the ledger."""
+    def deflated_sharpe(self, family: str, *, periods_per_year: int = 252, extra_trials: int = 0) -> dict:
+        """Deflated Sharpe of the best trial in the family, with the trial count taken from the ledger.
+
+        `extra_trials` is the number of variants you looked at that were **not** recorded (formulations dropped by eye, universes glanced at, horizons compared in a notebook): they raise the trial
+        count the best Sharpe ratio is deflated against. The ledger cannot know them; an honest number here is the only way they count."""
+        if isinstance(extra_trials, bool) or not isinstance(extra_trials, (int,)) or extra_trials < 0:
+            raise ValueError(f"extra_trials must be a whole number, 0 or more, got {extra_trials!r}")
         R, names = self.returns_matrix(family)
-        out = validation.deflated_sharpe(R, trials=self.n_trials(family), periods_per_year=periods_per_year)
+        out = validation.deflated_sharpe(R, trials=self.n_trials(family) + int(extra_trials), periods_per_year=periods_per_year)
+        out["extra_trials"] = int(extra_trials)
         out["best_name"] = names[out["best"]]
         out["verify"] = self.verify()
         return out

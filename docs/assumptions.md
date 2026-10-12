@@ -23,4 +23,8 @@ true and documented only in the code or spread over several places.
 | 16 | The default benchmark is the market-capitalisation-weighted (or equal-weighted) return of the same universe, not a published index; give `benchmark_returns` for another | Alpha against the wrong index | gathered here |
 | 17 | Overlapping holdings split capital equally among the tranches opened on different days | Differs from a book rebalanced at once | gathered here |
 | 18 | Funding: a positive rate means longs pay and shorts receive | Sign errors in a data feed flip the result | gathered here |
-| 19 | Forward returns are held in single precision (relative error about 6e-8) | Negligible | gathered here |
+| 19 | Borrow fees and buy/sell rates that vary with the date are read on the execution day (signal date + `entry_lag`); an unknown borrow fee on a held short raises; borrow is charged on the short leg | Pre-0.4.0 the rates were read on the signal date | gathered here |
+| 20 | A held position whose price is missing earns 0 and is counted (`held_missing_price_days`, a warning); a halt (a price, no volume) and a flagged delisting are not counted | A vendor gap understates volatility and drawdown | gathered here |
+| 21 | `entry_lag=0` trades at the same close the signal was computed on; the panel says so when it is chosen | Look-ahead unless the order is a market-on-close | gathered here |
+| 22 | The engines are research simulators: targets, not shares; drift back to target is free; tranches start empty and the first build is not charged | Turnover and cost are estimates | gathered here |
+| 23 | Forward returns are held in single precision (relative error about 6e-8) | Negligible | gathered here |

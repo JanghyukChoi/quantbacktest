@@ -45,12 +45,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input
+from .core.costs import apply_borrow, apply_side_cost, apply_turnover_cost, at_execution_dates, borrow_input, side_cost_input
 from .core.impact import ImpactModel, _impact_cost
 from .core.notes import keep_warnings, warn
 from .core.panel import Panel, check_alignment
 from .execution import check_freeze_return, exec_masks, freeze_hits, realize
-from .portfolio import (PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config, stop_at_ruin,
+from .portfolio import (_warn_held_without_price, PortfolioResult, _benchmark_returns, _check_benchmark, _check_cost, _forward_arrays, _side_config, stop_at_ruin,
                         _side_label, metrics)
 
 
@@ -85,6 +85,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     freeze_return = check_freeze_return(freeze_return)
     bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
     sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
+    bb, sb = at_execution_dates(bb, panel.entry_lag), at_execution_dates(sb, panel.entry_lag)       # a cost that varies with the date is the one in force on the day of the trade
     check_alignment(panel, weights, "weights")
     W = weights.reindex(index=panel.dates, columns=panel.tickers)
     raw = W.to_numpy(float)
@@ -147,9 +148,8 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     spread = apply_turnover_cost(H, spread_bp)                          # the first row, a build from cash, is not charged
     side = apply_side_cost(H, bb, sb)
     short = np.maximum(-H, 0.0)
-    b = np.asarray(borrow_bp, float)
-    borrow = (short * (b / 1e4 / panel.periods_per_year)).sum(axis=1) if b.ndim == 0 else \
-        (short * (np.nan_to_num(b, nan=0.0) / 1e4 / panel.periods_per_year)).sum(axis=1)
+    b = at_execution_dates(borrow_input(borrow_bp, panel.dates, panel.tickers), panel.entry_lag)
+    borrow = apply_borrow(short, b, panel.periods_per_year, panel.dates, panel.tickers)
     fcost = (H * fwdf).sum(axis=1)
     imp, part = (np.zeros(len(H)), None)
     if impact is not None:
@@ -166,6 +166,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
         warn("no position was held on any day: the weights are all zero or NaN, or `capital` is too small to buy one lot of anything; "
                       "the zero return is not a result", stacklevel=2)
     m["ruin_date"] = None if ruin is None else str(panel.dates[ruin].date())
+    _warn_held_without_price(panel, H != 0, cut, m)
     tr = np.zeros_like(H)
     tr[1:] = np.abs(np.diff(H, axis=0))
     m.update({"turnover_daily": float(0.5 * tr[:cut].sum(axis=1).mean()), "gross_CAGR": metrics(stop_at_ruin(gross, cut)[0][:cut], panel.dates, ppy)["CAGR"],
@@ -203,7 +204,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
     yr = s.groupby(s.index.year).apply(lambda g: float((1 + g).prod() - 1))
     spec = {"kind": "weights", "return_basis": panel.meta.get("return_basis"), "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": ppy,
             "spread": "panel" if np.ndim(spread_bp) else f"{spread_bp}bp round trip",
-            "buy_bp": _side_label(bb), "sell_bp": _side_label(sb), "borrow_bp": "panel" if b.ndim else float(b),
+            "buy_bp": _side_label(bb), "sell_bp": _side_label(sb), "borrow_bp": "panel" if np.ndim(b) else float(b),
             "impact": None if impact is None else {"aum": impact.aum, "y": impact.y, "vol_window": impact.vol_window,
                                                    "adv_window": impact.adv_window, "max_cost_bp": impact.max_cost_bp},
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
@@ -217,7 +218,7 @@ def backtest_weights(panel: Panel, weights: pd.DataFrame, *, spread_bp=0.0, buy_
                                                     "spread_bp": spread_bp if np.ndim(spread_bp) == 0 else array_fingerprint(spread_bp),
                                                     "weights": array_fingerprint(H_in), "data": panel.fingerprint()})
     return PortfolioResult(spec=spec, metrics=m, benchmark=bench, excess=bexc, yearly={str(k): v for k, v in yr.items()}, grid=None,
-                           holdings=H, net_returns=s, benchmark_returns=bret)
+                           holdings=H, net_returns=s, benchmark_returns=bret, pnl_dates=panel.dates[panel.entry_lag + 1:panel.entry_lag + 1 + len(s)])
 
 
 def _exec_config(capital, price, lot, mtv) -> dict:

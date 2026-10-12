@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .core.costs import apply_side_cost, apply_turnover_cost, side_cost_input, turnover
+from .core.costs import apply_borrow, apply_side_cost, apply_turnover_cost, at_execution_dates, borrow_input, side_cost_input, turnover
 from .core.impact import ImpactModel, _impact_cost
 from .core.notes import keep_warnings, warn
 from .core.panel import Panel, check_alignment
@@ -41,6 +41,7 @@ class PortfolioResult:
     benchmark_returns: pd.Series | None = None  # return of the benchmark on the same dates (no costs), when one was asked for
 
     notes: list = field(default_factory=list)   # the warnings the run raised (text), kept for programs that read the result
+    pnl_dates: pd.DatetimeIndex | None = None   # the date each return in `net_returns` was earned: net_returns is indexed by the SIGNAL date; this is the day (signal date + entry_lag + 1) whose close completed it
 
     def to_dict(self, series: str = "monthly") -> dict:
         """The result as a JSON-ready dictionary (see `pitbacktest.export`)."""
@@ -151,6 +152,40 @@ def metrics(net: np.ndarray, dates: pd.DatetimeIndex, ann: int = ANN) -> dict:
             "mdd_recovered": str(recov[0].date()) if len(recov) else "not recovered"}
 
 
+def held_without_price(panel: Panel, held: np.ndarray, cut: int) -> tuple[int, str]:
+    """Position-days (rows before `cut`) on which a position is held and the price needed to book its return is missing: the return of such a day is 0 (the engines treat a missing price as
+    cash), which is right for a trading halt or a security that has been delisted and wrong for a vendor gap, because volatility, drawdown and alpha are then understated.
+    Rows on or after a flagged delisting of the security (`panel.delist_after`) are not counted: there the missing price is expected and `delist_return` decides. Returns (count, the first
+    one as text)."""
+    px = panel.close.to_numpy(float)
+    lag = panel.entry_lag
+    T = px.shape[0]
+    entry = np.full(px.shape, np.nan); exit_ = np.full(px.shape, np.nan)
+    if lag < T:
+        entry[:T - lag] = px[lag:]
+    if lag + 1 < T:
+        exit_[:T - lag - 1] = px[lag + 1:]
+    miss = np.isnan(entry) | np.isnan(exit_)
+    if panel.delist_after is not None and bool(np.asarray(panel.delist_after.values).any()):
+        da = np.asarray(panel.delist_after.reindex(index=panel.dates, columns=panel.tickers).fillna(False).to_numpy(bool), dtype=int)
+        flagged = np.cumsum(da, axis=0) > 0                                    # the security has been flagged by this row or earlier
+        later = np.vstack([flagged[lag + 1:], np.repeat(flagged[-1:], lag + 1, axis=0)]) if lag + 1 < T else flagged
+        miss &= ~(flagged | later)
+    bad = miss[:cut] & np.asarray(held, bool)[:cut]
+    if not bad.any():
+        return 0, ""
+    i, j = np.argwhere(bad)[0]
+    return int(bad.sum()), f"{panel.tickers[j]} on {panel.dates[i].date()}"
+
+
+def _warn_held_without_price(panel: Panel, held: np.ndarray, cut: int, metrics_dict: dict) -> None:
+    n, first = held_without_price(panel, held, cut)
+    metrics_dict["held_missing_price_days"] = n
+    if n:
+        warn(f"{n} position-days (first: {first}) were held with no price to book their return: each earns 0, as cash. If this is a vendor data gap and not a trading halt, volatility, drawdown "
+             f"and alpha are understated; fill or drop the gap. See metrics['held_missing_price_days'].", stacklevel=3)
+
+
 def _forward_arrays(panel: Panel, funding: bool, delist_return: float | None):
     """The three (date x ticker) arrays every simulation needs, indexed by the **signal date** d:
     fwd[d]       return from close(d + lag) to close(d + lag + 1); a missing price earns 0 (cash), and the day after a
@@ -247,7 +282,7 @@ def _impact_config(impact: ImpactModel) -> dict:
 def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                        long_q: float = 0.10, short_q: float | None = 0.10,
                        hold: int = 5, weighting: str = "equal",
-                       spread_bp=20.0, buy_bp=0.0, sell_bp=0.0, benchmark: str | None = "cap",
+                       spread_bp=20.0, buy_bp=0.0, sell_bp=0.0, borrow_bp=0.0, benchmark: str | None = "cap",
                        grid: bool = True, funding: bool = True,
                        delist_return: float | None = None, freeze_days: int | None = None, freeze_return: float = 0.0,
                        cap_gross: bool = False, impact: ImpactModel | None = None, ledger=None, family: str = "default", name: str | None = None) -> PortfolioResult:
@@ -263,7 +298,9 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     buy_bp, sell_bp  One-way cost per unit of weight **bought** / **sold**, in bp, charged on top of the spread; a float, a Series
                 indexed by date (a rate that changes over time, for example a transaction tax) or a (date x ticker) frame. A weight going
                 down is a sell, so opening a short pays `sell_bp` and covering it pays `buy_bp` (a sales tax is charged when a short is
-                opened). The rate is read on the signal date. A missing value raises: an unknown rate is not zero.
+                opened). A rate that varies with the date is read on the **execution** date (signal date + `entry_lag`), the day the trade is done. A missing value raises: an unknown rate is not zero.
+    borrow_bp   annual borrow fee in bp on the short market value, charged per bar: a float, a Series indexed by date or a (date x ticker) frame. A fee that varies with the date is read on the execution day. It is charged on the short **leg** (the two legs are separate sleeves, as for the spread, so a security that is long in one tranche and
+                short in another pays on its short side). A fee that is NaN where a short is held raises (a fee you do not know is not zero). Without `Panel.shortable` every security is assumed borrowable and the result says so; a fee of 0, the default, says nothing about the real one.
     benchmark   cap (market-cap weighted) | equal (equal weighted) | None
     funding     if panel.funding exists, longs pay and shorts receive it (futures). False ignores it
     impact      `ImpactModel(aum=..., y=...)`: square-root market impact on the net trade of each security (needs `panel.volume`). `aum` is the money in **each leg**:
@@ -291,6 +328,9 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     freeze_return = check_freeze_return(freeze_return)
     bb = side_cost_input(buy_bp, panel.dates, panel.tickers, "buy_bp")
     sb = side_cost_input(sell_bp, panel.dates, panel.tickers, "sell_bp")
+    bb, sb = at_execution_dates(bb, panel.entry_lag), at_execution_dates(sb, panel.entry_lag)       # a cost that varies with the date is the one in force on the day of the trade
+    _check_cost(borrow_bp, "borrow_bp")
+    borw = at_execution_dates(borrow_input(borrow_bp, panel.dates, panel.tickers), panel.entry_lag)
     check_alignment(panel, factor, "factor")
     f = factor.reindex(index=panel.dates, columns=panel.tickers)
     el = panel.eligible
@@ -340,11 +380,13 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     fcost = (hl * fwdf).sum(axis=1)                     # longs pay a positive funding rate
     held = hl > 0
     hs = None
+    borrow = np.zeros(len(gross))
     if short_q:
         hs = execute(_tranche(leg(short_q, False), hold), -1.0, True)
         gross = gross - (hs * fwd).sum(axis=1)
         cost = cost + apply_turnover_cost(hs, spread_bp)
         side = side + apply_side_cost(-hs, bb, sb)                  # a short is a negative weight: opening it is a sell
+        borrow = apply_borrow(hs, borw, panel.periods_per_year, panel.dates, panel.tickers)
         turn = turn + turnover(hs)
         fcost = fcost - (hs * fwdf).sum(axis=1)         # shorts receive it
         held = held | (hs > 0)
@@ -352,7 +394,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     imp, part = np.zeros(len(gross)), None
     if impact is not None:
         imp, part = _impact_cost(panel, (hl - hs) if hs is not None else hl, impact)
-    net = gross - cost - fcost - imp
+    net = gross - cost - fcost - imp - borrow
 
     cut = len(panel.dates) - (panel.entry_lag + 1)
     net, ruin = stop_at_ruin(net, cut)
@@ -385,7 +427,12 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
     if panel.shortable is not None and short_q:
         m["short_leg_empty_days"] = int((el.to_numpy(bool).any(axis=1) & ~el_s.to_numpy(bool).any(axis=1))[:cut].sum())   # eligible names exist, none can be sold short
     m["funding_annual_bp"] = float(fcost[:cut].mean() * panel.periods_per_year * 1e4)   # positive = a cost
+    m["borrow_annual_bp"] = float(borrow[:cut].mean() * panel.periods_per_year * 1e4)
+    if short_q and panel.shortable is None:
+        warn("no `Panel.shortable`: every security is assumed to be borrowable on every day, and the borrow fee is "
+             + ("the number you gave" if np.ndim(borw) == 0 and borw > 0 else "0") + "; short-side results are optimistic for small, illiquid or distressed names", stacklevel=2)
     m["delist_events_held"] = int((held & hit_next)[:cut].sum())
+    _warn_held_without_price(panel, held, cut, m)
     npos = (hl > 0).sum(axis=1)
     m["avg_positions"] = float(npos[npos > 0].mean()) if (npos > 0).any() else float("nan")
     held_any = ((hl > 0).sum(axis=1) + ((hs > 0).sum(axis=1) if hs is not None else 0)) > 0
@@ -415,7 +462,7 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
                 co = apply_turnover_cost(hl2, c) + apply_side_cost(hl2, bb, sb) + (hl2 * fwdf).sum(axis=1)
                 if short_q:
                     gr = gr - (hs2 * fwd).sum(axis=1)
-                    co = co + apply_turnover_cost(hs2, c) + apply_side_cost(-hs2, bb, sb) - (hs2 * fwdf).sum(axis=1)
+                    co = co + apply_turnover_cost(hs2, c) + apply_side_cost(-hs2, bb, sb) - (hs2 * fwdf).sum(axis=1) + apply_borrow(hs2, borw, panel.periods_per_year, panel.dates, panel.tickers)
                 mm = metrics(stop_at_ruin(gr - co, cut)[0][:cut], panel.dates, panel.periods_per_year)
                 g[f"h{h}_c{c}"] = {"CAGR": mm["CAGR"], "Sharpe": mm["Sharpe"], "MDD": mm["MDD"]}
 
@@ -425,20 +472,20 @@ def backtest_portfolio(panel: Panel, factor: pd.DataFrame, *,
             "long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
             "spread_bp": spread_bp if np.isscalar(spread_bp) else array_fingerprint(spread_bp),
             "funding": bool(funding and panel.funding is not None), "delist_return": delist_return,
-            **_side_config(bb, sb), **({"freeze_days": int(freeze_days), "freeze_return": freeze_return} if freeze_days is not None else {}), **({"cap_gross": True} if cap_gross else {}),
+            **_side_config(bb, sb), **({"borrow_bp": float(borrow_bp) if np.ndim(borrow_bp) == 0 else array_fingerprint(np.asarray(borrow_bp, dtype=float))} if np.ndim(borrow_bp) or float(borrow_bp) != 0.0 else {}), **({"freeze_days": int(freeze_days), "freeze_return": freeze_return} if freeze_days is not None else {}), **({"cap_gross": True} if cap_gross else {}),
             **({"impact": _impact_config(impact)} if impact is not None else {}),
             "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
     return PortfolioResult(
         spec={"long_q": long_q, "short_q": short_q, "hold": hold, "weighting": weighting,
               "entry_lag": panel.entry_lag, "market": panel.market, "periods_per_year": panel.periods_per_year,
               "spread": "panel" if not np.isscalar(spread_bp) else f"{spread_bp}bp flat",
-              "buy_bp": _side_label(bb), "sell_bp": _side_label(sb),
+              "buy_bp": _side_label(bb), "sell_bp": _side_label(sb), "borrow_bp": "panel" if np.ndim(borw) else float(borw),
               "freeze": None if freeze_days is None else {"days": int(freeze_days), "return": freeze_return},
               "impact": None if impact is None else _impact_config(impact), "return_basis": panel.meta.get("return_basis"),
               "funding": bool(funding and panel.funding is not None), "delist_return": delist_return},
         metrics=m, benchmark=bench, excess=bexc,
         yearly={str(k): v for k, v in yr.items()}, grid=g,
-        holdings=(hl - hs) if hs is not None else hl, net_returns=s, benchmark_returns=bret)
+        holdings=(hl - hs) if hs is not None else hl, net_returns=s, benchmark_returns=bret, pnl_dates=panel.dates[panel.entry_lag + 1:panel.entry_lag + 1 + len(s)])
 
 
 def assert_timing(panel: Panel) -> dict:

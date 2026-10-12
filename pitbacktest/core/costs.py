@@ -124,6 +124,50 @@ def side_cost_input(value, dates: pd.DatetimeIndex, tickers: pd.Index, name: str
     return a
 
 
+def at_execution_dates(rate, lag: int):
+    """A cost rate that varies with the date, moved from the **signal** date to the **execution** date (`lag` rows later): the cost of trading is the rate in force when the trade is done.
+    A float is returned as it is; an array of (dates x tickers) or (dates x 1) is shifted up by `lag` rows, and the last `lag` rows (whose trades are outside the sample) repeat the final row."""
+    if not isinstance(rate, np.ndarray) or lag == 0:
+        return rate
+    return np.concatenate([rate[lag:], np.repeat(rate[-1:], lag, axis=0)], axis=0)
+
+
+def borrow_input(value, dates: pd.DatetimeIndex, tickers: pd.Index, name: str = "borrow_bp"):
+    """A borrow fee (annual bp on the short market value) as a float or a (dates x tickers) array: a (dates x tickers) frame is aligned on the panel (what it lacks is NaN), a Series indexed
+    by date is a fee that changes over time. NaN is allowed here and is an error only where a short position is held (`apply_borrow`): a fee you do not know is not zero."""
+    if value is None:
+        return 0.0
+    if isinstance(value, pd.DataFrame):
+        a = value.reindex(index=dates, columns=tickers).to_numpy(float)
+    elif isinstance(value, pd.Series):
+        if not isinstance(value.index, pd.DatetimeIndex):
+            raise ValueError(f"{name}: a Series must be indexed by date")
+        a = value.sort_index().reindex(dates, method="ffill").to_numpy(float).reshape(-1, 1)
+    else:
+        a = np.asarray(value, dtype=float)
+        if a.ndim == 0:
+            if not np.isfinite(a) or a < 0:
+                raise ValueError(f"{name} must be a finite number, not negative, got {value!r}")
+            return float(a)
+        if a.shape != (len(dates), len(tickers)):
+            raise ValueError(f"{name}: an array must have shape (dates, tickers) = {(len(dates), len(tickers))}, got {a.shape}")
+    if np.isinf(a).any() or (a < 0).any():
+        raise ValueError(f"{name} must be finite and not negative")
+    return a
+
+
+def apply_borrow(short: np.ndarray, borrow, periods_per_year: int, dates=None, tickers=None, name: str = "borrow_bp") -> np.ndarray:
+    """Daily borrow cost: the short market value (positive numbers) times the annual fee over the periods per year. A fee that is NaN where a short is held raises."""
+    if not isinstance(borrow, np.ndarray):
+        return short.sum(axis=1) * (borrow / 1e4 / periods_per_year)
+    unknown = np.isnan(borrow) & (short > 1e-12)
+    if unknown.any():
+        i, j = np.argwhere(unknown)[0]
+        where = f" (first: {tickers[j]} on {dates[i].date()})" if dates is not None and tickers is not None else ""
+        raise ValueError(f"{name} is unknown (NaN) on {int(unknown.sum())} position-days on which a short is held{where}: a fee you do not know is not zero. Fill it, or give a number for the names you short")
+    return (short * (np.nan_to_num(borrow, nan=0.0) / 1e4 / periods_per_year)).sum(axis=1)
+
+
 def apply_side_cost(holdings: np.ndarray, buy_bp, sell_bp) -> np.ndarray:
     """Daily cost of trades that depends on the side: `buy_bp` per unit of weight bought and `sell_bp` per unit sold (one-way,
     bp, on top of the spread). A weight going up is a buy and a weight going down is a sell, so opening a short is a sell and

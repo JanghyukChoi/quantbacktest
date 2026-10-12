@@ -49,21 +49,24 @@ class ScreenResult:
 
 
 def _deploy(fire: np.ndarray, cum: np.ndarray, ev: np.ndarray,
-            cost_bp: float) -> tuple[np.ndarray, dict]:
+            cost_bp: float, return_rows: bool = False):
     # adapt to the universe size: a fixed threshold throws away every date in a small universe
     med = float(np.median(ev.sum(axis=1)))
     min_pool = int(max(5, min(30, med * 0.5)))
-    exc = []
+    exc, rows = [], []
     for i in range(cum.shape[0]):
         s = fire[i] & np.isfinite(cum[i])
         pool = ev[i] & np.isfinite(cum[i])
         if s.sum() >= 1 and pool.sum() >= min_pool:
             exc.append(cum[i][s].mean() - cum[i][pool].mean())
+            rows.append(i)
     a = np.array(exc)
     if len(a) < 100:
-        return a, {"excess_bp": np.nan, "net_bp": np.nan, "t": np.nan}
-    mu, _, t, _ = newey_west_t(a, lag=21)
-    return a, {"excess_bp": float(mu * 1e4), "net_bp": float(mu * 1e4 - cost_bp), "t": float(t)}
+        out = {"excess_bp": np.nan, "net_bp": np.nan, "t": np.nan}
+    else:
+        mu, _, t, _ = newey_west_t(a, lag=21)
+        out = {"excess_bp": float(mu * 1e4), "net_bp": float(mu * 1e4 - cost_bp), "t": float(t)}
+    return (a, out, np.array(rows, dtype=int)) if return_rows else (a, out)
 
 
 @keep_warnings
@@ -72,11 +75,18 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
            primary_h: int = 20, cost_bp: float = 20.0,
            fire_q: float = 0.10, n_null: int = 20,
            gate_config: GateConfig | None = None,
-           neutralize_all: bool = True, delist_return: float | None = None) -> ScreenResult:
+           neutralize_all: bool = True, delist_return: float | None = None,
+           ledger=None, family: str = "screen") -> ScreenResult:
     """Screen many factors at once.
 
     factors  {name: (date x ticker) continuous factor}
     delist_return  return assumed on the day after a security's last bar when it is flagged in panel.delist_after (None: carried at its last price).
+    ledger, family  record every factor screened (its day-level excess return of the top `fire_q`, and its settings) in a `Ledger` under `family`, so that each counts as a trial in the deflated Sharpe of
+                    the family. Screening many factors and keeping the best is a search, and the ledger is what remembers its size.
+
+    **What `passed` means.** G1 is a t-statistic after controls; G2 to G6 judge the raw, uncontrolled top-`fire_q` portfolio. Passing says: the factor's link to returns survives controls statistically, *and* the raw
+    portfolio is profitable after costs, monotone, stable and not a static basket. It does not say that the controlled portfolio is profitable: for that read `neu_survival_%` or set
+    `GateConfig(min_neutral_survival=50)`, which adds gate G7 (at least that share of the excess return remains after neutralising, and its net figure is above 0).
 
     In the summary, `t` is the Fama-MacBeth t **with controls**, and `neu_t` and `neu_survival_%` re-test the factor after residualising it
     against the controls. `excess_bp`, `net_bp`, `rho` and the gates G2 to G6 come from the **uncontrolled** top `fire_q` firing. The uncontrolled
@@ -122,7 +132,12 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
         fm = fama_macbeth(f, fwd, ctrl, el)
         rk = f.rank(axis=1, pct=True, na_option="keep")
         fire = ((rk >= 1 - fire_q) & el).values
-        de, dep = _deploy(fire, cums[primary_h], ev, cost_bp)
+        de, dep, de_rows = _deploy(fire, cums[primary_h], ev, cost_bp, return_rows=True)
+        if ledger is not None and len(de):
+            from .ledger import array_fingerprint
+            ledger.record(family, str(name), pd.Series(de, index=panel.dates[de_rows]), {
+                "kind": "screen", "horizon": int(primary_h), "cost_bp": float(cost_bp), "fire_q": float(fire_q), "delist_return": delist_return,
+                "factor": array_fingerprint(f.to_numpy()), "data": panel.fingerprint()})
         dec = decile_profile(f, fwd[primary_h], el, lag=max(primary_h, 21))
         g = run_gates(de, panel.dates, t_stat=fm[primary_h]["t"], net_bp=dep["net_bp"],
                       rho=dec["monotonicity_rho"], fire=fire, tickers=panel.tickers,
@@ -139,6 +154,11 @@ def screen(panel: Panel, factors: dict[str, pd.DataFrame], *,
                     if np.isfinite(dep["excess_bp"]) and abs(dep["excess_bp"]) > 1e-9 else np.nan)
             neu = {"t": fmn[primary_h]["t"], "excess_bp": depn["excess_bp"],
                    "net_bp": depn["net_bp"], "survival_pct": float(keep) if np.isfinite(keep) else np.nan}
+            if cfg.min_neutral_survival is not None:                       # an economic gate on the neutralised portfolio, opt-in: G1 is a t with controls, G2 to G6 look at the raw portfolio
+                ok7 = bool(np.isfinite(neu["survival_pct"]) and neu["survival_pct"] >= cfg.min_neutral_survival and np.isfinite(depn["net_bp"]) and depn["net_bp"] > 0)
+                g["steps"].append({"gate": "G7 survives neutralisation", "pass": ok7, "detail": f"{neu['survival_pct']:.0f}% of the excess return remains, net {depn['net_bp']:+.1f}bp (needs {cfg.min_neutral_survival:.0f}% and net above 0)"})
+                g["passed"] = bool(g["passed"] and ok7)
+                g["failed_at"] = next((x["gate"] for x in g["steps"] if not x["pass"]), None)
 
         detail[name] = {"fm": {h: fm[h] for h in horizons}, "deploy": dep,
                         "decile": dec, "gates": g, "neutralized": neu}

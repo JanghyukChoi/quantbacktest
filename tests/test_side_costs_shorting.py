@@ -96,7 +96,7 @@ def test_schedule_and_unknown_rates():
     b = q.backtest_weights(p, W, sell_bp=sched, benchmark=None)
     H = W.to_numpy(); ref = np.zeros(len(H))
     for t in range(1, len(H)):
-        rate = 40.0 if p.dates[t] >= switch else 10.0
+        rate = 40.0 if p.dates[min(t + p.entry_lag, len(H) - 1)] >= switch else 10.0                  # the rate in force on the day of the trade: signal date + entry_lag
         ref[t] = sum(max(-(H[t, j] - H[t - 1, j]), 0.0) for j in range(H.shape[1])) * rate / 1e4
     cut = len(H) - 2
     assert np.allclose((a.net_returns - b.net_returns).to_numpy(), ref[:cut], atol=1e-13, rtol=0)

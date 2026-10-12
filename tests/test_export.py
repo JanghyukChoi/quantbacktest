@@ -47,8 +47,8 @@ def test_portfolio_json():
         else:
             assert got == v, (k, got, v)
     known = {"CAGR", "MDD", "Sharpe", "Sortino", "Calmar", "vol", "years", "pos_days", "mdd_peak", "mdd_trough", "mdd_recovered", "ruined", "ruin_date", "gross_CAGR",
-             "cost_annual_bp", "side_cost_annual_bp", "funding_annual_bp", "turnover_daily", "avg_positions"}
-    assert set(r.metrics) <= known | {"delist_events_held"}, set(r.metrics) - known                     # a metric added later must get a unit here
+             "cost_annual_bp", "side_cost_annual_bp", "borrow_annual_bp", "funding_annual_bp", "turnover_daily", "avg_positions"}
+    assert set(r.metrics) <= known | {"delist_events_held", "held_missing_price_days"}, set(r.metrics) - known                     # a metric added later must get a unit here
     assert known - {"ruin_date"} <= set(d["units"]) and all(isinstance(u, str) and u for u in d["units"].values())
     # monthly returns against a hand computation
     s = r.net_returns
