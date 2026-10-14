@@ -11,7 +11,7 @@ Python 3.10 to 3.14; the only requirements are `pandas` and `numpy`. It is not a
 pip install pitbacktest
 ```
 
-Status: **alpha**. No human has reviewed it yet; read `docs/verification_status.md` for what has been checked and what has not.
+Status: **alpha**. One person has read its specification and given feedback (the definitions, not the code); no human has reviewed the code. Read `docs/verification_status.md` for what has been checked and what has not.
 
 ## See it work (two minutes, no data to download)
 
@@ -330,7 +330,7 @@ be traded. The archive has bars, not an order book, so there is no queue, no par
 pip install pitbacktest           # from PyPI; import it as `pitbacktest`. pandas and numpy are the only requirements
 ```
 
-Status: **alpha**. No human has reviewed it yet; read `docs/verification_status.md` first. From a clone:
+Status: **alpha**. One person has read its specification (not the code); no human has reviewed the code. Read `docs/verification_status.md` first. From a clone:
 
 ```bash
 pip install -e .                  # pandas and numpy are the only requirements
@@ -429,7 +429,7 @@ symbol, with no error. See `docs/survivorship.md`.
 
 ## What is verified, and what is not
 
-[`docs/verification_status.md`](https://github.com/JanghyukChoi/quantbacktest/blob/main/docs/verification_status.md) lists the evidence behind each part and, more important, what is not established (no human review yet, Korean dividends, the impact coefficient, the weaker
+[`docs/verification_status.md`](https://github.com/JanghyukChoi/quantbacktest/blob/main/docs/verification_status.md) lists the evidence behind each part and, more important, what is not established (no human review of the code, Korean dividends, the impact coefficient, the weaker
 parts such as `screen` and `backtest_event`). Read it before relying on a result.
 
 ## Tests: known answers, not real data
