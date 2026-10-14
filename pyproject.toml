@@ -5,7 +5,7 @@ description = "Backtest harness for factor screening, event signals and portfoli
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["backtest", "quant", "survivorship-bias", "overfitting", "point-in-time", "deflated-sharpe", "factor"]
+keywords = ["backtest", "quant", "survivorship-bias", "look-ahead-bias", "overfitting", "point-in-time", "deflated-sharpe", "walk-forward", "factor", "crypto", "korea", "ai-agents"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Financial and Insurance Industry",
@@ -32,6 +32,9 @@ dev = ["pytest>=7.0", "statsmodels", "scipy", "hypothesis", "empyrical-reloaded"
 [project.urls]
 Repository = "https://github.com/JanghyukChoi/quantbacktest"
 Issues = "https://github.com/JanghyukChoi/quantbacktest/issues"
+Changelog = "https://github.com/JanghyukChoi/quantbacktest/blob/main/CHANGELOG.md"
+"What has been verified" = "https://github.com/JanghyukChoi/quantbacktest/blob/main/docs/verification_status.md"
+"For AI assistants" = "https://github.com/JanghyukChoi/quantbacktest/blob/main/AGENTS.md"
 
 [build-system]
 requires = ["setuptools>=77"]

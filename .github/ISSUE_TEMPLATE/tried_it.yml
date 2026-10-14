@@ -1,0 +1,43 @@
+name: I tried it on my data
+description: Where did you get stuck, or what surprised you? This is the most useful kind of report.
+title: "[tried it] "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying it. You do not need a bug for this: "I could not figure out X" or "I expected Y" is exactly what is wanted. Please do not paste data you may not share.
+  - type: dropdown
+    id: market
+    attributes:
+      label: What did you run it on?
+      options: [US stocks, Korean stocks, Crypto perpetuals, Other / my own data]
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: What were you trying to find out?
+      placeholder: "For example: whether a 20-day momentum factor on my universe survives costs."
+    validations:
+      required: true
+  - type: textarea
+    id: stuck
+    attributes:
+      label: Where did you get stuck, or what was confusing?
+      description: The step, the message you saw, what you tried. Wrong or unclear wording in the README or AGENTS.md counts.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+  - type: input
+    id: version
+    attributes:
+      label: Version (`python -c "import pitbacktest; print(pitbacktest.__version__)"`)
+  - type: textarea
+    id: notes
+    attributes:
+      label: "`review.summary()` or `result.notes`, if you have them (no data, only the text)"
+      render: text

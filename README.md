@@ -1,6 +1,7 @@
 # quantbacktest
 
 [![CI](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml/badge.svg)](https://github.com/JanghyukChoi/quantbacktest/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pitbacktest)](https://pypi.org/project/pitbacktest/)
 
 **Is your backtest real, or luck?** `pitbacktest` runs a trading strategy through the tests an institution would ask for and writes one page (and one JSON file) that says
 what limits the number: survivorship, look-ahead, costs, how many variants you tried, and whether the edge is bigger than chance. US stocks, Korean stocks and crypto perpetuals.
@@ -102,6 +103,12 @@ Ask it, for example:
 
 This is not an MCP server yet. A chat window in a browser (claude.ai, ChatGPT) cannot reach your computer or your data, so use an assistant that runs on your machine, or upload a
 price file there and ask for the review in text.
+
+## Tried it? Tell me where it got in your way
+
+This is an alpha release and the most useful thing you can send is **where you got stuck**: a step of the README that did not work on your data, a message you did not understand, a figure that disagrees with
+another tool. Open an issue with the "I tried it on my data" form (no bug needed, and no data: the text of `review.summary()` is enough), or with "A number looks wrong" if you can show a figure and what it
+should be. `docs/verification_status.md` says what has been checked and what has not, and `docs/reviewing.md` is a brief for anyone who wants to try to break it.
 
 ## Why it is different
 
